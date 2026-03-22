@@ -6,3 +6,7 @@ assets = { directory = "./build/client" }
 
 [observability]
 enabled = true
+
+[vars]
+GEMINI_API_KEY = "AIzaSyAkZER7uIEUp3vCA1387gE5yLwPTvN1FMo"
+TWELVE_DATA_API_KEY = "d3dc21e6cdba4e3a89f0c7620d6206c4"

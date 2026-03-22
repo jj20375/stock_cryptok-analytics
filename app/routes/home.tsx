@@ -1501,7 +1501,7 @@ EMA26: ${latestData.emaLong?.toFixed(2)}
             </section>
 
             {/* Main Price Chart */}
-            <section className="border border-[#141414] p-3 md:p-4 bg-white min-h-[400px] md:min-h-[700px] h-[60vh] md:h-[85vh] max-h-[1000px] rounded-sm relative flex flex-col overflow-hidden">
+            <section className="border border-[#141414] p-3 md:p-4 bg-white min-h-[850px] md:min-h-[700px] h-[90vh] md:h-[85vh] max-h-[1200px] rounded-sm relative flex flex-col overflow-hidden">
               {isAiAnalyzing && (
                 <div className="absolute inset-0 z-50 bg-[#141414]/80 backdrop-blur-sm flex flex-col items-center justify-center text-white p-8 text-center">
                   <div className="relative mb-6">
