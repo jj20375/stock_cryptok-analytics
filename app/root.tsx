@@ -41,6 +41,25 @@ export function Layout({ children }: { children: React.ReactNode }) {
   );
 }
 
+import { LoaderFunctionArgs } from "react-router";
+import { drizzle } from "drizzle-orm/d1";
+import { eq } from "drizzle-orm";
+import { users } from "./db/schema";
+import { getUserId } from "./utils/auth";
+
+export async function loader({ request, context }: LoaderFunctionArgs) {
+  const userId = await getUserId(request);
+  if (!userId) {
+    return { user: null };
+  }
+
+  const env = context.cloudflare.env as any;
+  const db = drizzle(env.DB);
+  const user = await db.select().from(users).where(eq(users.id, userId)).get();
+
+  return { user: user ? { email: user.email } : null };
+}
+
 export default function Root() {
   return <Outlet />;
 }

@@ -8,17 +8,14 @@ import { init, dispose, Chart } from 'klinecharts';
 import { 
   TrendingUp, TrendingDown, Activity, Info, RefreshCw, 
   ChevronRight, ArrowUpRight, ArrowDownRight, Search, 
-  LayoutGrid, List, Settings, Bell, User, Zap, AlertCircle
+  LayoutGrid, List, Settings, Bell, User, Zap, AlertCircle,
+  Star, Trash2, PieChart, Newspaper, BrainCircuit
 } from 'lucide-react';
-import { fetchStockData, getTradingSignal, getStockName } from '../services/stockService';
+import { fetchStockData, getTradingSignal, getStockName, evaluateConsecutiveVolume, evaluateVolumeNoBreakout } from '../services/stockService';
 import { StockDataPoint, Signal, Timeframe } from '../types';
-import { clsx, type ClassValue } from 'clsx';
-import { twMerge } from 'tailwind-merge';
-
-// Utility for tailwind classes
-function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs));
-}
+import { cn } from '../utils/cn';
+import { Link, useRouteLoaderData } from "react-router";
+import { AppLayout } from '../components/AppLayout';
 
 const STOCKS = {
   US: [
@@ -210,7 +207,138 @@ export default function App() {
   const [isAiAnalyzing, setIsAiAnalyzing] = useState(false);
   const [aiStrategy, setAiStrategy] = useState<any>(null); // Use any for now or specific type if known
   const [isGeneratingStrategy, setIsGeneratingStrategy] = useState(false);
+  // 【詳細繁體中文註解】：自訂掃描策略機制與時間週期的狀態變數
+  const [scanStrategy, setScanStrategy] = useState<'trend' | 'consecutive_volume' | 'volume_no_break'>('trend');
+  const [scanTimeframe, setScanTimeframe] = useState<Timeframe>('1d');
   const hotPicksRef = useRef<HTMLDivElement>(null);
+  const rootData = useRouteLoaderData<{ user: { id: number, email: string } | null }>("root");
+  const user = rootData?.user;
+
+  // Portfolio related states
+  const [portfolio, setPortfolio] = useState<{symbol: string; name: string; market: string}[]>([]);
+  const [isAnalyzingPortfolio, setIsAnalyzingPortfolio] = useState<string | null>(null);
+  const [analysisResult, setAnalysisResult] = useState<any>(null);
+  const [portfolioLoading, setPortfolioLoading] = useState(false);
+  const [isAddingToPortfolio, setIsAddingToPortfolio] = useState(false);
+
+  // Fetch portfolio
+  const fetchPortfolio = async () => {
+    if (!user) return;
+    setPortfolioLoading(true);
+    try {
+      const res = await fetch("/api/portfolio");
+      if (res.ok) {
+        const data = await res.json();
+        setPortfolio(data.portfolio || []);
+      }
+    } catch (err) {
+      console.error("Failed to fetch portfolio:", err);
+    } finally {
+      setPortfolioLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchPortfolio();
+  }, [user]);
+
+  const addToPortfolio = async (stock: {symbol: string; name: string}) => {
+    if (!user) {
+      alert("請先登入後再加入持股");
+      return;
+    }
+    setIsAddingToPortfolio(true);
+    try {
+      const res = await fetch("/api/portfolio", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...stock, market })
+      });
+      if (res.ok) {
+        await fetchPortfolio();
+        alert(`已將 ${stock.name} 加入持股清單`);
+      } else {
+        const errData = await res.json();
+        alert(`加入失敗: ${errData.error || "未知錯誤"}`);
+      }
+    } catch (err) {
+      console.error("Add failed:", err);
+      alert("系統錯誤，請稍後再試");
+    } finally {
+      setIsAddingToPortfolio(false);
+    }
+  };
+
+  const removeFromPortfolio = async (symbol: string) => {
+    try {
+      const res = await fetch("/api/portfolio", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ symbol })
+      });
+      if (res.ok) {
+        fetchPortfolio();
+      }
+    } catch (err) {
+      console.error("Remove failed:", err);
+    }
+  };
+
+  const analyzePortfolioStock = async (stock: {symbol: string, market: string}) => {
+    setIsAnalyzingPortfolio(stock.symbol);
+    setAnalysisResult(null);
+    try {
+      const res = await fetch(`/api/analyze-stock?symbol=${encodeURIComponent(stock.symbol)}&market=${stock.market}`);
+      if (res.ok) {
+        const data = await res.json();
+        setAnalysisResult(data);
+      }
+    } catch (err) {
+      console.error("Analysis failed:", err);
+    } finally {
+      setIsAnalyzingPortfolio(null);
+    }
+  };
+
+  const updatePortfolioDetails = async (symbol: string, avgPrice: string, shares: string) => {
+    try {
+      const res = await fetch("/api/portfolio", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ symbol, avgPrice, shares })
+      });
+      if (res.ok) {
+        fetchPortfolio();
+      }
+    } catch (err) {
+      console.error("Update failed:", err);
+    }
+  };
+
+  const portfolioSummary = useMemo(() => {
+    let totalCost = 0;
+    let totalValue = 0;
+    let wins = 0;
+    let totalWithCost = 0;
+
+    portfolio.forEach(stock => {
+      if (stock.avgPrice && stock.shares && stock.currentPrice) {
+        const cost = parseFloat(stock.avgPrice) * parseFloat(stock.shares);
+        const value = (stock.currentPrice as number) * parseFloat(stock.shares);
+        totalCost += cost;
+        totalValue += value;
+        totalWithCost++;
+        if (value > cost) wins++;
+      }
+    });
+
+    return {
+      totalPnL: totalValue - totalCost,
+      totalROI: totalCost > 0 ? ((totalValue - totalCost) / totalCost) * 100 : 0,
+      winRate: totalWithCost > 0 ? (wins / totalWithCost) * 100 : 0,
+      totalCost
+    };
+  }, [portfolio]);
 
   // Fetch top 50 stocks when market changes
   useEffect(() => {
@@ -221,15 +349,6 @@ export default function App() {
           const data = await res.json();
           if (data.symbols && data.symbols.length > 0) {
             setCurrentStocks(data.symbols);
-            // If the user hasn't manually selected a stock yet, update the selected stock
-            // to the first of the new top 50 list.
-            setSelectedStock(prev => {
-              // Only update if it's currently the default first item of the hardcoded list
-              if (prev.symbol === STOCKS[market][0].symbol) {
-                return data.symbols[0];
-              }
-              return prev;
-            });
           }
         }
       } catch (err) {
@@ -256,7 +375,7 @@ export default function App() {
     if (!searchQuery) return;
     
     let symbol = searchQuery.toUpperCase();
-    if (market === 'TW' && !symbol.includes('.')) {
+    if (market === 'TW' && /^\d{4,6}$/.test(symbol)) {
       symbol += '.TW';
     } else if (market === 'CRYPTO' && !symbol.includes('/') && !symbol.includes('-')) {
       symbol += '/USD';
@@ -384,125 +503,169 @@ EMA26: ${latestData.emaLong?.toFixed(2)}
       const stock = currentList[i];
       setScanProgress(Math.round(((i + 1) / total) * 100));
       try {
-        const { data: stockData } = await fetchStockData(stock.symbol, 60);
-        if (stockData.length < 20) continue;
-        
-        const latest = stockData[stockData.length - 1];
-        const prev = stockData[stockData.length - 2];
-        
-        // Trend detection via MA20 slope
-        const trend = latest.ma20 > prev.ma20 ? 'up' : 'down';
-        
-        let score = 0;
-        let reasons: string[] = [];
-        
-        if (market === 'CRYPTO') {
-          // 策略 B: 虛擬幣極短線反彈 (捕捉 EMA 趨勢下的回調反彈)
-          if (latest.close > latest.emaLong) {
-            score += 30;
-            reasons.push("趨勢偏多(站上EMA)");
+        if (scanStrategy === 'consecutive_volume') {
+          // 【詳細繁體中文註解】：呼叫新增的「連續爆量策略」判定邏輯
+          const res = await evaluateConsecutiveVolume(stock.symbol, scanTimeframe, 1.5);
+          if (res.isTriggered) {
+            results.push({
+              symbol: stock.symbol,
+              name: stock.name,
+              score: Math.min(100, 50 + res.consecutiveDays * 15),
+              reason: res.reasons.join(", "),
+              trend: 'up' // 爆量通常偏向多頭表態或洗盤結束
+            });
           }
-          
-          if (latest.rsi < 30) {
-            score += 50;
-            reasons.push("RSI 極度超賣");
-          } else if (latest.rsi < 45) {
-            score += 30;
-            reasons.push("RSI 偏低回調");
-          }
-          
-          if (latest.macdHist > prev.macdHist) {
-            score += 20;
-            reasons.push("MACD 動能轉強");
+        } else if (scanStrategy === 'volume_no_break') {
+          // 【詳細繁體中文註解】：呼叫新增的「爆量但未突破高點策略」判定邏輯
+          const res = await evaluateVolumeNoBreakout(stock.symbol, scanTimeframe, 1.5);
+          if (res.isTriggered) {
+            results.push({
+              symbol: stock.symbol,
+              name: stock.name,
+              score: 75,
+              reason: res.reasons.join(", "),
+              trend: 'down' // 未過高通常代表上檔有壓，偏向中性偏空或拉回震盪
+            });
           }
         } else {
-          // 策略 A: 股票短線波段 (尋找趨勢回調後的波段買點)
-          const isAboveMA20 = latest.close > latest.ma20;
-          const isAboveEMA50 = latest.close > latest.emaLong; // using emaLong as proxy for mid-term trend
+          // 【詳細繁體中文註解】：原本的多空趨勢追蹤掃描邏輯，支援自訂時間週期
+          const { data: stockData } = await fetchStockData(stock.symbol, 60, scanTimeframe);
+          if (stockData.length < 20) continue;
           
-          if (isAboveMA20 || isAboveEMA50) {
-            score += 40;
-            reasons.push("中期趨勢向上");
-            
-            // 尋找回調買點: RSI 降溫但未破壞趨勢
-            if (latest.rsi < 55 && latest.rsi > 35) {
+          const latest = stockData[stockData.length - 1];
+          const prev = stockData[stockData.length - 2];
+          
+          // 透過 MA20 的斜率偵測趨勢
+          const trend = latest.ma20 > prev.ma20 ? 'up' : 'down';
+          
+          let score = 0;
+          let reasons: string[] = [];
+          
+          if (market === 'CRYPTO') {
+            // 策略 B: 虛擬幣極短線反彈 (捕捉 EMA 趨勢下的回調反彈)
+            if (latest.close > latest.emaLong) {
               score += 30;
-              reasons.push("指標健康回調");
+              reasons.push("趨勢偏多(站上EMA)");
             }
             
-            // 價格靠近 MA20 支撐 (距離小於 3%)
-            const distToMA20 = Math.abs(latest.close - latest.ma20) / latest.ma20;
-            if (distToMA20 < 0.03 && latest.close >= latest.ma20) {
+            if (latest.rsi < 30) {
+              score += 50;
+              reasons.push("RSI 極度超賣");
+            } else if (latest.rsi < 45) {
               score += 30;
-              reasons.push("回測均線支撐");
+              reasons.push("RSI 偏低回調");
+            }
+            
+            if (latest.macdHist > prev.macdHist) {
+              score += 20;
+              reasons.push("MACD 動能轉強");
             }
           } else {
-            // 跌破均線，如果是剛突破也可以
-            if (prev.close <= prev.ma20 && latest.close > latest.ma20) {
-              score += 50;
-              reasons.push("強勢站上月線");
+            // 策略 A: 股票短線波段 (尋找趨勢回調後的波段買點)
+            const isAboveMA20 = latest.close > latest.ma20;
+            const isAboveEMA50 = latest.close > latest.emaLong;
+            
+            if (isAboveMA20 || isAboveEMA50) {
+              score += 40;
+              reasons.push("中期趨勢向上");
+              
+              // 尋找回調買點: RSI 降溫但未破壞趨勢
+              if (latest.rsi < 55 && latest.rsi > 35) {
+                score += 30;
+                reasons.push("指標健康回調");
+              }
+              
+              // 價格靠近 MA20 支撐 (距離小於 3%)
+              const distToMA20 = Math.abs(latest.close - latest.ma20) / latest.ma20;
+              if (distToMA20 < 0.03 && latest.close >= latest.ma20) {
+                score += 30;
+                reasons.push("回測均線支撐");
+              }
+            } else {
+              // 跌破均線，如果是剛突破也可以
+              if (prev.close <= prev.ma20 && latest.close > latest.ma20) {
+                score += 50;
+                reasons.push("強勢站上月線");
+              }
             }
           }
-        }
 
-        if (score >= 40) {
-          results.push({
-            symbol: stock.symbol,
-            name: stock.name,
-            score,
-            reason: reasons.join(", ") || "趨勢穩定",
-            trend
-          });
+          if (score >= 40) {
+            results.push({
+              symbol: stock.symbol,
+              name: stock.name,
+              score,
+              reason: reasons.join(", ") || "趨勢穩定",
+              trend
+            });
+          }
         }
       } catch (e) {
         console.error(`Error scanning ${stock.symbol}:`, e);
       }
     }
     
-    // AI Analysis Phase
+    // AI 分析階段
     const topCandidates = results.sort((a, b) => b.score - a.score).slice(0, 15);
     
-    // Set initial technical results immediately so user sees something
+    // 立即更新初步的技術分析結果，讓使用者可以馬上看見
     if (topCandidates.length > 0) {
       setScanResults(topCandidates.slice(0, 10));
       setLastUpdated(new Date().toLocaleTimeString());
       
       setIsAiAnalyzing(true);
       try {
+        // 【詳細繁體中文註解】：動態產生對應特定策略的 AI Prompt，提升 AI 智能洞察品質
+        let strategyDescription = "";
+        if (scanStrategy === 'consecutive_volume') {
+          strategyDescription = `「連續兩天/期以上爆量策略」（掃描成交量連續放大，代表有大量資金持續關注並建倉的強勢標的）於 ${scanTimeframe} 週期。`;
+        } else if (scanStrategy === 'volume_no_break') {
+          strategyDescription = `「爆量但未突破前高策略」（掃描爆出大量但受制於前高阻力的標的，可能暗示上檔出貨壓大，或主力在此進行最後洗盤與箱型盤整）於 ${scanTimeframe} 週期。`;
+        } else {
+          strategyDescription = `「多空指標強勢追蹤策略」（結合 RSI、MACD、EMA 篩選趨勢向上且具備良好短線回調買點的標的）於 ${scanTimeframe} 週期。`;
+        }
+
         const response = await fetch("/api/gemini", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             type: "scanner",
-            prompt: `你是一位資深的量化交易與 AI 策略分析師。請深入分析以下這幾檔股票的技術指標（RSI, EMA, KD, MACD, MA20），並為前 10 名提供極具參考價值的「AI 智能洞察建議」(Traditional Chinese)。
+            prompt: `你是一位資深的量化交易與 AI 策略分析師。請深入分析以下這幾檔股票的技術指標與成交量特徵，配合當前我們所使用的策略：${strategyDescription}，並為前 10 名提供極具參考價值的「AI 智能洞察建議」(Traditional Chinese)。
           
           候選名單：
           ${JSON.stringify(topCandidates)}
           
           請執行以下任務：
-          1. 根據技術指標的趨勢強度與反轉潛力，對這 15 檔股票進行二次排序，挑選出最強的 10 檔。
+          1. 根據技術指標與本策略特性的匹配度，對這 15 檔股票進行二次排序，挑選出最符合該策略特徵的 10 檔。
           2. 為每檔股票提供 20 字以內的具體建議。建議應包含：
-             - 具體的支撐位或壓力位。
-             - 當前的型態特徵（如：底背離、突破、回踩）。
-             - 具體的進場或出場警示。
-          3. 確保每檔股票的建議都是獨一無二的，避免籠統的「趨勢轉強」。
+             - 具體的支撐位或阻力位。
+             - 當前的型態特徵與此策略的關聯性。
+             - 具體的進場或防守（止損）警示。
+          3. 確保每檔股票的建議都是獨一無二的，符合 Traditional Chinese (繁體中文)，避免籠統的「趨勢轉強」。
           
           請回傳 JSON 格式，包含一個陣列，每個物件有 symbol 和 aiInsight。`
           })
         });
 
         const aiData = await response.json();
-        const aiMap = new Map(aiData.recommendations.map((r: any) => [r.symbol, r.aiInsight]));
+        
+        // 增加解析容錯：有些模型可能回傳陣列而非物件
+        const recommendations = Array.isArray(aiData) ? aiData : (aiData.recommendations || []);
+        const aiMap = new Map(recommendations.map((r: any) => [r.symbol, r.aiInsight]));
         
         const finalResults = topCandidates.map(res => ({
           ...res,
-          aiInsight: aiMap.get(res.symbol) || "技術面轉強，建議關注"
+          aiInsight: aiMap.get(res.symbol) || res.reason || "技術面轉強，建議關注"
         })).slice(0, 10);
         
         setScanResults(finalResults);
       } catch (err) {
         console.error('AI Analysis failed:', err);
-        // Keep technical results if AI fails
+        // 如果 AI 失敗，也更新 scanResults 填入預設文字，避免一直顯示 Loading
+        setScanResults(prev => prev.map(res => ({
+          ...res,
+          aiInsight: res.aiInsight || res.reason || "技術面趨勢形成，建議關注"
+        })));
       } finally {
         setIsAiAnalyzing(false);
       }
@@ -794,58 +957,8 @@ EMA26: ${latestData.emaLong?.toFixed(2)}
   }, [showIndicators]);
 
   return (
-    <div className="min-h-screen bg-[#E4E3E0] text-[#141414] font-sans selection:bg-[#141414] selection:text-[#E4E3E0] pb-16 md:pb-0">
-      {/* Sidebar Navigation - Desktop Only */}
-      <aside className="fixed left-0 top-0 h-full w-16 border-r border-[#141414] hidden md:flex flex-col items-center py-8 gap-8 bg-[#E4E3E0] z-20">
-        <div className="w-10 h-10 bg-[#141414] rounded-sm flex items-center justify-center text-[#E4E3E0]">
-          <Activity size={24} />
-        </div>
-        <nav className="flex flex-col gap-6">
-          <button className="p-2 hover:bg-[#141414] hover:text-[#E4E3E0] transition-colors rounded-sm">
-            <LayoutGrid size={20} />
-          </button>
-          <button className="p-2 bg-[#141414] text-[#E4E3E0] rounded-sm">
-            <Activity size={20} />
-          </button>
-          <button className="p-2 hover:bg-[#141414] hover:text-[#E4E3E0] transition-colors rounded-sm">
-            <List size={20} />
-          </button>
-          <button className="p-2 hover:bg-[#141414] hover:text-[#E4E3E0] transition-colors rounded-sm">
-            <Bell size={20} />
-          </button>
-        </nav>
-        <div className="mt-auto flex flex-col gap-6 pb-4">
-          <button className="p-2 hover:bg-[#141414] hover:text-[#E4E3E0] transition-colors rounded-sm">
-            <Settings size={20} />
-          </button>
-          <button className="p-2 hover:bg-[#141414] hover:text-[#E4E3E0] transition-colors rounded-sm">
-            <User size={20} />
-          </button>
-        </div>
-      </aside>
-
-      {/* Mobile Bottom Navigation */}
-      <nav className="fixed bottom-0 left-0 w-full h-16 bg-[#E4E3E0] border-t border-[#141414] flex md:hidden items-center justify-around px-4 z-30">
-        <button className="p-2 bg-[#141414] text-[#E4E3E0] rounded-sm">
-          <Activity size={20} />
-        </button>
-        <button className="p-2 hover:bg-[#141414] hover:text-[#E4E3E0] transition-colors rounded-sm">
-          <LayoutGrid size={20} />
-        </button>
-        <button className="p-2 hover:bg-[#141414] hover:text-[#E4E3E0] transition-colors rounded-sm">
-          <Search size={20} />
-        </button>
-        <button className="p-2 hover:bg-[#141414] hover:text-[#E4E3E0] transition-colors rounded-sm">
-          <Bell size={20} />
-        </button>
-        <button className="p-2 hover:bg-[#141414] hover:text-[#E4E3E0] transition-colors rounded-sm" onClick={() => handleMarketChange(market)}>
-          <RefreshCw size={20} />
-        </button>
-      </nav>
-
-      {/* Main Content */}
-      <main className="pl-0 md:pl-16 min-h-screen overflow-x-hidden overflow-y-auto bg-[#E4E3E0]">
-        {/* Header */}
+    <AppLayout>
+      {/* Header */}
         <header className="min-h-16 border-b border-[#141414] flex flex-wrap items-center px-4 md:px-8 justify-between sticky top-0 bg-[#E4E3E0]/80 backdrop-blur-md z-10 py-2 md:py-0">
           <div className="flex flex-wrap items-center gap-2 md:gap-4">
             <h1 className="font-serif italic text-lg md:text-xl tracking-tight">台美股短線系統</h1>
@@ -962,7 +1075,9 @@ EMA26: ${latestData.emaLong?.toFixed(2)}
                     <span className="flex items-center gap-1">
                       <Zap className="w-3 h-3 text-indigo-600" /> AI 智能推薦 (TOP 10)
                     </span>
-                    <span className="opacity-50 font-mono">AI-RANKED</span>
+                    <span className="opacity-50 font-mono text-[8px]">
+                      {scanStrategy === 'consecutive_volume' ? '連續爆量' : scanStrategy === 'volume_no_break' ? '爆量未過高' : '趨勢追蹤'} ({scanTimeframe})
+                    </span>
                   </p>
                   <div className="space-y-2 max-h-[400px] overflow-y-auto pr-1 custom-scrollbar">
                     {scanResults.slice(0, 10).map((res, idx) => (
@@ -1047,6 +1162,185 @@ EMA26: ${latestData.emaLong?.toFixed(2)}
               </div>
             </section>
 
+            {/* My Portfolio Section */}
+            {user && (
+              <section className="border border-[#141414] p-6 bg-white/50">
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="font-serif italic text-xs uppercase tracking-widest opacity-50 flex items-center gap-2">
+                    <Star size={12} className="text-amber-500" /> My Portfolio
+                  </h2>
+                  <span className="text-[9px] font-mono opacity-40">{portfolio.length} ASSETS</span>
+                </div>
+
+                {/* Portfolio Dashboard Summary */}
+                {portfolio.length > 0 && portfolioSummary.totalCost > 0 && (
+                  <div className="grid grid-cols-3 gap-2 mb-6 p-3 bg-[#141414] text-white rounded-sm">
+                    <div className="flex flex-col">
+                      <span className="text-[8px] opacity-50 uppercase font-mono">Total P/L</span>
+                      <span className={cn(
+                        "text-xs font-bold font-mono",
+                        portfolioSummary.totalPnL >= 0 ? "text-emerald-400" : "text-rose-400"
+                      )}>
+                        {portfolioSummary.totalPnL >= 0 ? "+" : ""}{portfolioSummary.totalPnL.toLocaleString(undefined, {maximumFractionDigits: 0})}
+                      </span>
+                    </div>
+                    <div className="flex flex-col border-l border-white/10 pl-2">
+                      <span className="text-[8px] opacity-50 uppercase font-mono">ROI</span>
+                      <span className={cn(
+                        "text-xs font-bold font-mono",
+                        portfolioSummary.totalROI >= 0 ? "text-emerald-400" : "text-rose-400"
+                      )}>
+                        {portfolioSummary.totalROI.toFixed(2)}%
+                      </span>
+                    </div>
+                    <div className="flex flex-col border-l border-white/10 pl-2">
+                      <span className="text-[8px] opacity-50 uppercase font-mono">Win Rate</span>
+                      <span className="text-xs font-bold font-mono text-amber-400">
+                        {portfolioSummary.winRate.toFixed(0)}%
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  {portfolio.length === 0 ? (
+                    <div className="py-8 text-center border border-dashed border-[#141414]/20 rounded-sm">
+                      <p className="text-[10px] opacity-40">尚無持股，點擊 ★ 加入</p>
+                    </div>
+                  ) : (
+                    portfolio.map((stock) => (
+                      <div key={stock.symbol} className="group">
+                        <div className="p-2 hover:bg-[#141414]/5 rounded-sm transition-all border border-transparent hover:border-[#141414]/10">
+                          <div className="flex items-center justify-between mb-2">
+                            <button 
+                              onClick={() => setSelectedStock({symbol: stock.symbol, name: stock.name || stock.symbol})}
+                              className="flex-1 text-left"
+                            >
+                              <div className="flex items-baseline gap-2">
+                                <span className="font-mono font-bold text-xs">{stock.symbol}</span>
+                                {stock.currentPrice && (
+                                  <span className="text-[10px] font-mono opacity-50">${(stock.currentPrice as number).toFixed(2)}</span>
+                                )}
+                              </div>
+                              <div className="text-[9px] opacity-60 truncate">{stock.name}</div>
+                            </button>
+                            <div className="flex items-center gap-1">
+                              <button 
+                                onClick={() => analyzePortfolioStock(stock)}
+                                disabled={isAnalyzingPortfolio === stock.symbol}
+                                className="p-1.5 hover:bg-indigo-100 text-indigo-600 rounded-sm transition-all"
+                                title="AI 深度分析"
+                              >
+                                {isAnalyzingPortfolio === stock.symbol ? (
+                                  <RefreshCw size={12} className="animate-spin" />
+                                ) : (
+                                  <BrainCircuit size={12} />
+                                )}
+                              </button>
+                              <button 
+                                onClick={() => removeFromPortfolio(stock.symbol)}
+                                className="p-1.5 hover:bg-rose-100 text-rose-500 rounded-sm transition-all opacity-0 group-hover:opacity-100"
+                                title="移除持股"
+                              >
+                                <Trash2 size={12} />
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* P/L and Inputs */}
+                          <div className="flex items-end justify-between gap-2 mt-1 pt-2 border-t border-dashed border-[#141414]/5">
+                            <div className="flex gap-2">
+                              <div className="flex flex-col gap-0.5">
+                                <label className="text-[7px] uppercase opacity-40 font-mono">均價</label>
+                                <input 
+                                  type="number" 
+                                  defaultValue={stock.avgPrice || ""}
+                                  onBlur={(e) => updatePortfolioDetails(stock.symbol, e.target.value, stock.shares || "")}
+                                  placeholder="0.00"
+                                  className="w-14 text-[10px] font-mono bg-transparent border-b border-[#141414]/10 focus:border-indigo-500 outline-none"
+                                />
+                              </div>
+                              <div className="flex flex-col gap-0.5">
+                                <label className="text-[7px] uppercase opacity-40 font-mono">股數</label>
+                                <input 
+                                  type="number" 
+                                  defaultValue={stock.shares || ""}
+                                  onBlur={(e) => updatePortfolioDetails(stock.symbol, stock.avgPrice || "", e.target.value)}
+                                  placeholder="0"
+                                  className="w-12 text-[10px] font-mono bg-transparent border-b border-[#141414]/10 focus:border-indigo-500 outline-none"
+                                />
+                              </div>
+                            </div>
+
+                            {stock.avgPrice && stock.shares && stock.currentPrice && (
+                              <div className="text-right">
+                                <div className={cn(
+                                  "text-[10px] font-bold font-mono leading-none",
+                                  (stock.currentPrice as number) >= parseFloat(stock.avgPrice) ? "text-emerald-600" : "text-rose-600"
+                                )}>
+                                  {(((stock.currentPrice as number) - parseFloat(stock.avgPrice)) / parseFloat(stock.avgPrice) * 100).toFixed(1)}%
+                                </div>
+                                <div className="text-[8px] font-mono opacity-50">
+                                  {((stock.currentPrice as number - parseFloat(stock.avgPrice)) * parseFloat(stock.shares)).toLocaleString(undefined, {maximumFractionDigits: 0})}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        
+                        {/* Analysis Inline Display */}
+                        {isAnalyzingPortfolio === stock.symbol && (
+                          <div className="mt-2 p-3 bg-indigo-50 border border-indigo-100 rounded-sm animate-pulse">
+                            <div className="flex items-center gap-2 mb-2">
+                              <BrainCircuit size={10} className="text-indigo-500" />
+                              <span className="text-[9px] font-bold text-indigo-900 uppercase">AI 分析中...</span>
+                            </div>
+                            <div className="h-2 w-full bg-indigo-200 rounded-full mb-1" />
+                            <div className="h-2 w-2/3 bg-indigo-200 rounded-full" />
+                          </div>
+                        )}
+
+                        {analysisResult && isAnalyzingPortfolio === null && selectedStock.symbol === stock.symbol && (
+                          <div className="mt-2 p-3 bg-white border border-indigo-200 rounded-sm shadow-sm">
+                            <div className="flex items-center justify-between mb-2">
+                              <div className="flex items-center gap-2">
+                                <BrainCircuit size={10} className="text-indigo-600" />
+                                <span className="text-[9px] font-bold text-indigo-900 uppercase">AI 深度洞察</span>
+                              </div>
+                              <div className="text-[10px] font-mono font-bold text-indigo-600 bg-indigo-50 px-1 rounded">
+                                題材力道: {analysisResult.score}/10
+                              </div>
+                            </div>
+                            
+                            <div className="space-y-2">
+                              <div>
+                                <div className="text-[8px] font-mono opacity-50 uppercase flex items-center gap-1">
+                                  <PieChart size={8} /> 大戶動向
+                                </div>
+                                <p className="text-[10px] leading-tight text-[#141414] mt-0.5 italic">"{analysisResult.smartMoneyInsight}"</p>
+                              </div>
+                              <div>
+                                <div className="text-[8px] font-mono opacity-50 uppercase flex items-center gap-1">
+                                  <Newspaper size={8} /> 核心題材
+                                </div>
+                                <p className="text-[10px] leading-tight text-[#141414] mt-0.5">{analysisResult.themeAnalysis}</p>
+                              </div>
+                              <button 
+                                onClick={() => setAnalysisResult(null)}
+                                className="w-full text-[8px] font-mono opacity-30 hover:opacity-100 mt-2 uppercase text-center py-1 border-t border-dashed"
+                              >
+                                收合分析
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </section>
+            )}
+
             {/* Signal Card */}
             <section className={cn(
               "border border-[#141414] p-6 transition-all duration-500",
@@ -1103,10 +1397,10 @@ EMA26: ${latestData.emaLong?.toFixed(2)}
                       <div className="text-[10px] font-mono opacity-50 uppercase mb-1">結論</div>
                       <div className={cn(
                         "text-base font-bold",
-                        aiStrategy.conclusion.includes('進場') ? "text-emerald-600" : 
-                        aiStrategy.conclusion.includes('觀察') ? "text-amber-600" : "text-rose-600"
+                        aiStrategy.conclusion?.includes('進場') ? "text-emerald-600" : 
+                        aiStrategy.conclusion?.includes('觀察') ? "text-amber-600" : "text-rose-600"
                       )}>
-                        {aiStrategy.conclusion}
+                        {aiStrategy.conclusion || "分析結果格式異常"}
                       </div>
                     </div>
 
@@ -1392,7 +1686,135 @@ EMA26: ${latestData.emaLong?.toFixed(2)}
                 </div>
               </div>
               
-              {scanResults.length > 0 ? (
+              {/* 【詳細繁體中文註解】：量化策略與週期控制面板，整合為一體的 Glassmorphic 介面 */}
+              <div className="mb-6 bg-white/5 border border-white/10 rounded-sm p-4 backdrop-blur-md">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {/* 策略選擇 */}
+                  <div className="md:col-span-2 flex flex-col gap-1.5">
+                    <span className="text-[10px] uppercase tracking-widest text-[#E4E3E0] opacity-50 font-bold font-mono">
+                      選擇量化分析策略 (Strategy Mechanism)
+                    </span>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setScanStrategy('trend')}
+                        className={cn(
+                          "text-left p-2.5 rounded-sm border text-[11px] transition-all relative active:scale-[0.98]",
+                          scanStrategy === 'trend'
+                            ? "bg-emerald-500/10 border-emerald-500/50 text-emerald-400 font-bold"
+                            : "bg-black/40 border-white/5 text-[#E4E3E0]/70 hover:border-white/10"
+                        )}
+                      >
+                        <div className="font-bold flex items-center gap-1">
+                          <BrainCircuit size={12} className={cn(scanStrategy === 'trend' ? "text-emerald-400" : "text-[#E4E3E0]/40")} />
+                          多空趨勢強勢追蹤
+                        </div>
+                        <div className="text-[9px] opacity-50 mt-1 leading-normal">
+                          結合 RSI、MACD 及 KD，篩選趨勢偏多且適度回調的標的。
+                        </div>
+                      </button>
+                      
+                      <button
+                        type="button"
+                        onClick={() => setScanStrategy('consecutive_volume')}
+                        className={cn(
+                          "text-left p-2.5 rounded-sm border text-[11px] transition-all relative active:scale-[0.98]",
+                          scanStrategy === 'consecutive_volume'
+                            ? "bg-emerald-500/10 border-emerald-500/50 text-emerald-400 font-bold"
+                            : "bg-black/40 border-white/5 text-[#E4E3E0]/70 hover:border-white/10"
+                        )}
+                      >
+                        <div className="font-bold flex items-center gap-1">
+                          <Activity size={12} className={cn(scanStrategy === 'consecutive_volume' ? "text-emerald-400" : "text-[#E4E3E0]/40")} />
+                          量能連續兩期以上放大
+                        </div>
+                        <div className="text-[9px] opacity-50 mt-1 leading-normal">
+                          成交量連續大於 5 期均量 1.5 倍，尋找主力連續吸籌信號。
+                        </div>
+                      </button>
+                      
+                      <button
+                        type="button"
+                        onClick={() => setScanStrategy('volume_no_break')}
+                        className={cn(
+                          "text-left p-2.5 rounded-sm border text-[11px] transition-all relative active:scale-[0.98]",
+                          scanStrategy === 'volume_no_break'
+                            ? "bg-emerald-500/10 border-emerald-500/50 text-emerald-400 font-bold"
+                            : "bg-black/40 border-white/5 text-[#E4E3E0]/70 hover:border-white/10"
+                        )}
+                      >
+                        <div className="font-bold flex items-center gap-1">
+                          <TrendingDown size={12} className={cn(scanStrategy === 'volume_no_break' ? "text-emerald-400" : "text-[#E4E3E0]/40")} />
+                          量增但未突破前高
+                        </div>
+                        <div className="text-[9px] opacity-50 mt-1 leading-normal">
+                          成交量放大但最高價受制於前高，暗示有洗盤吸籌或出貨壓力。
+                        </div>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 週期與執行按鈕 */}
+                  <div className="flex flex-col gap-1.5 justify-between">
+                    <div className="flex flex-col gap-1.5">
+                      <span className="text-[10px] uppercase tracking-widest text-[#E4E3E0] opacity-50 font-bold font-mono">
+                        掃描時間週期 (Timeframe)
+                      </span>
+                      <div className="grid grid-cols-4 gap-1">
+                        {(['1d', '4h', '60m', '15m'] as const).map((tf) => {
+                          const labelMap = {
+                            '1d': '日線',
+                            '4h': '4H',
+                            '60m': '1H',
+                            '15m': '15M'
+                          };
+                          return (
+                            <button
+                              key={tf}
+                              type="button"
+                              onClick={() => setScanTimeframe(tf)}
+                              className={cn(
+                                "py-1.5 text-[10px] rounded-sm border text-center transition-all font-mono font-bold active:scale-[0.95]",
+                                scanTimeframe === tf
+                                  ? "bg-emerald-500 text-[#141414] border-emerald-500"
+                                  : "bg-black/40 border-white/5 text-[#E4E3E0]/70 hover:border-white/10"
+                              )}
+                            >
+                              {labelMap[tf]}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    
+                    {/* 一鍵執行 */}
+                    <button
+                      onClick={runScanner}
+                      disabled={scanning}
+                      className="w-full py-2.5 px-4 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-[#141414] font-bold text-xs rounded-sm transition-all flex items-center justify-center gap-2 active:scale-[0.98] font-mono tracking-widest"
+                    >
+                      <Zap size={14} className={cn(scanning && "animate-pulse")} />
+                      {scanning ? 'SCANNING...' : 'START SCAN'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* 掃描狀態/結果主切換區 */}
+              {scanning ? (
+                <div className="flex flex-col items-center justify-center py-16 bg-white/5 border border-dashed border-[#E4E3E0]/20 rounded-sm">
+                  <div className="relative mb-6">
+                    <div className="w-16 h-16 border-4 border-emerald-500/20 border-t-emerald-500 rounded-full animate-spin" />
+                    <Zap className="w-6 h-6 text-emerald-500 absolute inset-0 m-auto animate-pulse" />
+                  </div>
+                  <h3 className="text-lg font-serif italic mb-2">AI 智能市場掃描中...</h3>
+                  <p className="text-xs opacity-40 mb-6 font-mono">正在分析全市場技術指標與 K 線型態</p>
+                  <div className="w-64 h-1.5 bg-white/10 rounded-full overflow-hidden">
+                    <div className="h-full bg-emerald-500 transition-all duration-300" style={{ width: `${scanProgress}%` }} />
+                  </div>
+                  <div className="mt-2 text-[10px] font-mono opacity-50">{scanProgress}% COMPLETE</div>
+                </div>
+              ) : scanResults.length > 0 ? (
                 <div className="grid grid-cols-1 xs:grid-cols-2 lg:grid-cols-5 gap-3 md:gap-4">
                   {scanResults.slice(0, 10).map((res, idx) => (
                     <button
@@ -1448,54 +1870,32 @@ EMA26: ${latestData.emaLong?.toFixed(2)}
                     </button>
                   ))}
                 </div>
-              ) : scanning ? (
-                <div className="flex flex-col items-center justify-center py-16 bg-white/5 border border-dashed border-[#E4E3E0]/20 rounded-sm">
-                  <div className="relative mb-6">
-                    <div className="w-16 h-16 border-4 border-emerald-500/20 border-t-emerald-500 rounded-full animate-spin" />
-                    <Zap className="w-6 h-6 text-emerald-500 absolute inset-0 m-auto animate-pulse" />
-                  </div>
-                  <h3 className="text-lg font-serif italic mb-2">AI 智能市場掃描中...</h3>
-                  <p className="text-xs opacity-40 mb-6 font-mono">正在分析全市場技術指標與 K 線型態</p>
-                  <div className="w-64 h-1.5 bg-white/10 rounded-full overflow-hidden">
-                    <div className="h-full bg-emerald-500 transition-all duration-300" style={{ width: `${scanProgress}%` }} />
-                  </div>
-                  <div className="mt-2 text-[10px] font-mono opacity-50">{scanProgress}% COMPLETE</div>
-                </div>
               ) : hasRunScan ? (
-                <div className="flex flex-col items-center justify-center py-16 bg-white/5 border border-dashed border-rose-500/20 rounded-sm">
-                  <div className="w-16 h-16 bg-rose-500/5 rounded-full flex items-center justify-center mb-6">
-                    <Activity className="w-8 h-8 text-rose-500/30" />
+                <div className="flex flex-col items-center justify-center py-12 bg-white/5 border border-dashed border-rose-500/20 rounded-sm">
+                  <div className="w-12 h-12 bg-rose-500/5 rounded-full flex items-center justify-center mb-4">
+                    <Activity className="w-6 h-6 text-rose-500/30" />
                   </div>
-                  <h3 className="text-xl font-serif italic mb-3">掃描完成：目前市場趨勢平穩</h3>
-                  <p className="text-sm opacity-40 mb-8 max-w-md text-center leading-relaxed">
-                    本次掃描未發現符合「強勢轉強」條件的標的。建議稍後再試，或切換至其他市場（US/Crypto）尋找機會。
+                  <h3 className="text-md font-serif italic mb-2 text-[#E4E3E0]">無符合策略之標的</h3>
+                  <p className="text-xs opacity-40 mb-4 max-w-md text-center leading-relaxed">
+                    本次以【{
+                      scanStrategy === 'consecutive_volume' ? '量能連續兩期放大' : 
+                      scanStrategy === 'volume_no_break' ? '量增但未突破前高' : '多空趨勢強勢追蹤'
+                    }】策略及【{
+                      scanTimeframe === '1d' ? '日線' : 
+                      scanTimeframe === '4h' ? '4小時線' : 
+                      scanTimeframe === '60m' ? '1小時線' : '15分鐘線'
+                    }】週期掃描，未發現符合條件之標的。您可以調整上方控制面板的策略或週期，然後重新嘗試。
                   </p>
-                  <button 
-                    onClick={runScanner}
-                    className="flex items-center gap-3 bg-white/10 hover:bg-white/20 text-white font-bold py-3 px-8 rounded-sm transition-all"
-                  >
-                    <RefreshCw className="w-4 h-4" />
-                    重新掃描
-                  </button>
                 </div>
               ) : (
                 <div className="flex flex-col items-center justify-center py-16 bg-white/5 border border-dashed border-[#E4E3E0]/20 rounded-sm">
-                  <div className="w-16 h-16 bg-white/5 rounded-full flex items-center justify-center mb-6">
+                  <div className="w-16 h-16 bg-white/5 rounded-full flex items-center justify-center mb-4">
                     <Search className="w-8 h-8 opacity-20" />
                   </div>
                   <h3 className="text-xl font-serif italic mb-3">發現下一個交易機會</h3>
-                  <p className="text-sm opacity-40 mb-8 max-w-md text-center leading-relaxed">
-                    點擊下方按鈕啟動 AI 智能掃描，系統將自動分析 RSI、MACD、KD 等多重技術指標，為您挑選當前市場最強勢的 10 檔標的。
+                  <p className="text-xs opacity-40 mb-2 max-w-md text-center leading-relaxed">
+                    請於上方控制面板選擇量化分析策略與時間週期，點擊「START SCAN」啟動 AI 智能多指標掃描，為您即時篩選當前市場最符合該特性的前 10 檔標的。
                   </p>
-                  <button 
-                    onClick={runScanner}
-                    disabled={scanning}
-                    className="group relative flex items-center gap-3 bg-emerald-500 hover:bg-emerald-600 text-[#141414] font-bold py-4 px-10 rounded-sm transition-all active:scale-95 disabled:opacity-50 overflow-hidden"
-                  >
-                    <div className="absolute inset-0 bg-white/20 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-500" />
-                    <Zap className={cn("w-5 h-5", scanning && "animate-pulse")} />
-                    <span className="tracking-widest">START MARKET SCAN</span>
-                  </button>
                 </div>
               )}
             </section>
@@ -1521,7 +1921,35 @@ EMA26: ${latestData.emaLong?.toFixed(2)}
               )}
               <div className="flex justify-between items-start mb-2">
                 <div className="flex flex-col">
-                  <h2 className="text-lg font-bold font-serif leading-none">{selectedStock.name}({selectedStock.symbol})</h2>
+                  <div className="flex items-center gap-3">
+                    <h2 className="text-lg font-bold font-serif leading-none">{selectedStock.name}({selectedStock.symbol})</h2>
+                    {user && (
+                      <button 
+                        onClick={() => {
+                          const isInPortfolio = portfolio.some(p => p.symbol === selectedStock.symbol);
+                          if (isInPortfolio) {
+                            removeFromPortfolio(selectedStock.symbol);
+                          } else {
+                            addToPortfolio(selectedStock);
+                          }
+                        }}
+                        disabled={isAddingToPortfolio}
+                        className={cn(
+                          "p-1 rounded-full border transition-all",
+                          portfolio.some(p => p.symbol === selectedStock.symbol)
+                            ? "bg-amber-100 border-amber-300 text-amber-500"
+                            : "border-[#141414]/10 hover:bg-[#141414]/5",
+                          isAddingToPortfolio && "opacity-50 cursor-not-allowed"
+                        )}
+                      >
+                        {isAddingToPortfolio ? (
+                           <RefreshCw size={14} className="animate-spin" />
+                        ) : (
+                          <Star size={14} fill={portfolio.some(p => p.symbol === selectedStock.symbol) ? "currentColor" : "none"} />
+                        )}
+                      </button>
+                    )}
+                  </div>
                   <span className="text-[10px] font-mono opacity-50">Data points: {filteredData.length} | Timeframe: {timeframe}</span>
                 </div>
               </div>
@@ -1542,10 +1970,9 @@ EMA26: ${latestData.emaLong?.toFixed(2)}
             </section>
           </div>
         </div>
-      </main>
 
       {/* Footer Info */}
-      <footer className="pl-0 md:pl-16 p-4 md:p-8 border-t border-[#141414] bg-[#E4E3E0] flex flex-col md:flex-row justify-between items-center gap-4 text-center md:text-left">
+      <footer className="p-4 md:p-8 border-t border-[#141414] bg-[#E4E3E0] flex flex-col md:flex-row justify-between items-center gap-4 text-center md:text-left">
         <div className="text-[9px] md:text-[10px] font-mono opacity-40 uppercase tracking-[0.1em] md:tracking-[0.2em]">
           Algorithm: EMA Crossover + RSI Momentum • v1.0.4
         </div>
@@ -1565,6 +1992,6 @@ EMA26: ${latestData.emaLong?.toFixed(2)}
           </div>
         </div>
       )}
-    </div>
+    </AppLayout>
   );
 }

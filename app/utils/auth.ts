@@ -1,0 +1,107 @@
+// 【詳細繁體中文註解】：身份驗證模組
+// 負責密碼的雜湊 (PBKDF2) 以及 React Router 的 Session 管理
+
+import { createCookieSessionStorage } from "react-router";
+
+/**
+ * 產生隨機鹽 (Salt)
+ */
+function generateSalt(): string {
+  const array = new Uint8Array(16);
+  crypto.getRandomValues(array);
+  return Array.from(array, byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * 使用 PBKDF2 進行密碼雜湊
+ * @param password 使用者輸入的明文密碼
+ * @param salt 鹽值
+ */
+async function hashWithSalt(password: string, salt: string): Promise<string> {
+  const enc = new TextEncoder();
+  const keyMaterial = await crypto.subtle.importKey(
+    "raw",
+    enc.encode(password),
+    { name: "PBKDF2" },
+    false,
+    ["deriveBits", "deriveKey"]
+  );
+
+  const saltBuffer = enc.encode(salt);
+  
+  // 執行 100,000 次疊代，提升暴力破解難度
+  const hashBuffer = await crypto.subtle.deriveBits(
+    {
+      name: "PBKDF2",
+      salt: saltBuffer,
+      iterations: 100000,
+      hash: "SHA-256"
+    },
+    keyMaterial,
+    256 // 輸出 256 bits (32 bytes) 的長度
+  );
+
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  
+  // 儲存格式：salt:hash
+  return `${salt}:${hashHex}`;
+}
+
+/**
+ * 雜湊密碼（用於註冊時儲存入資料庫）
+ */
+export async function hashPassword(password: string): Promise<string> {
+  const salt = generateSalt();
+  return hashWithSalt(password, salt);
+}
+
+/**
+ * 驗證密碼（用於登入時比對）
+ */
+export async function verifyPassword(password: string, storedHash: string): Promise<boolean> {
+  const [salt, originalHash] = storedHash.split(':');
+  if (!salt || !originalHash) return false;
+  
+  const attemptHash = await hashWithSalt(password, salt);
+  return attemptHash === storedHash;
+}
+
+// ==========================================
+// Session 管理 (登入狀態)
+// ==========================================
+
+export const sessionStorage = createCookieSessionStorage({
+  cookie: {
+    name: "__crypto_session",
+    httpOnly: true,
+    path: "/",
+    sameSite: "lax",
+    secrets: ["s3cr3t_auth_k3y_for_s3ssion"], // 理想情況下應透過環境變數傳入，此處為求方便寫死
+    secure: true, // 在生產環境與 localhost HTTPS 皆可運作
+    maxAge: 60 * 60 * 24 * 7, // Session 存活 7 天
+  },
+});
+
+export async function getSession(request: Request) {
+  const cookie = request.headers.get("Cookie");
+  return sessionStorage.getSession(cookie);
+}
+
+export async function commitSession(session: any) {
+  return sessionStorage.commitSession(session);
+}
+
+export async function destroySession(session: any) {
+  return sessionStorage.destroySession(session);
+}
+
+/**
+ * 取得當前登入使用者的 ID，如果未登入則回傳 null
+ */
+export async function getUserId(request: Request): Promise<number | null> {
+  const session = await getSession(request);
+  const userId = session.get("userId");
+  if (!userId) return null;
+  return Number(userId);
+}

@@ -1,0 +1,1 @@
+ALTER TABLE `users` ADD `strategy_timeframe` text DEFAULT '4h' NOT NULL;

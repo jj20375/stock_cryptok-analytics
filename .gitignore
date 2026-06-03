@@ -6,3 +6,12 @@ coverage/
 *.log
 .env*
 !.env.example
+.dev.vars
+
+# Cloudflare D1 & Wrangler Local Data
+.wrangler/
+*.sqlite
+*.sqlite3
+
+# Drizzle ORM
+.drizzle/

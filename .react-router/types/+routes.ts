@@ -14,6 +14,12 @@ type Pages = {
   "/": {
     params: {};
   };
+  "/dashboard": {
+    params: {};
+  };
+  "/stock-analysis": {
+    params: {};
+  };
   "/api/top50": {
     params: {};
   };
@@ -25,16 +31,60 @@ type Pages = {
   "/api/gemini": {
     params: {};
   };
+  "/api/logout": {
+    params: {};
+  };
+  "/api/test-telegram": {
+    params: {};
+  };
+  "/api/test-slack": {
+    params: {};
+  };
+  "/api/test-strategy": {
+    params: {};
+  };
+  "/api/test-crypto": {
+    params: {};
+  };
+  "/api/portfolio": {
+    params: {};
+  };
+  "/api/analyze-stock": {
+    params: {};
+  };
+  "/api/run-report": {
+    params: {};
+  };
+  "/login": {
+    params: {};
+  };
+  "/register": {
+    params: {};
+  };
+  "/portfolio": {
+    params: {};
+  };
+  "/settings": {
+    params: {};
+  };
 };
 
 type RouteFiles = {
   "root.tsx": {
     id: "root";
-    page: "/" | "/api/top50" | "/api/stock/*" | "/api/gemini";
+    page: "/" | "/dashboard" | "/stock-analysis" | "/api/top50" | "/api/stock/*" | "/api/gemini" | "/api/logout" | "/api/test-telegram" | "/api/test-slack" | "/api/test-strategy" | "/api/test-crypto" | "/api/portfolio" | "/api/analyze-stock" | "/api/run-report" | "/login" | "/register" | "/portfolio" | "/settings";
   };
   "routes/home.tsx": {
     id: "routes/home";
     page: "/";
+  };
+  "routes/dashboard.tsx": {
+    id: "routes/dashboard";
+    page: "/dashboard";
+  };
+  "routes/stock-analysis.tsx": {
+    id: "routes/stock-analysis";
+    page: "/stock-analysis";
   };
   "routes/api.top50.ts": {
     id: "routes/api.top50";
@@ -48,12 +98,74 @@ type RouteFiles = {
     id: "routes/api.gemini";
     page: "/api/gemini";
   };
+  "routes/api.logout.ts": {
+    id: "routes/api.logout";
+    page: "/api/logout";
+  };
+  "routes/api.test-telegram.ts": {
+    id: "routes/api.test-telegram";
+    page: "/api/test-telegram";
+  };
+  "routes/api.test-slack.ts": {
+    id: "routes/api.test-slack";
+    page: "/api/test-slack";
+  };
+  "routes/api.test-strategy.ts": {
+    id: "routes/api.test-strategy";
+    page: "/api/test-strategy";
+  };
+  "routes/api.test-crypto.ts": {
+    id: "routes/api.test-crypto";
+    page: "/api/test-crypto";
+  };
+  "routes/api.portfolio.ts": {
+    id: "routes/api.portfolio";
+    page: "/api/portfolio";
+  };
+  "routes/api.analyze-stock.ts": {
+    id: "routes/api.analyze-stock";
+    page: "/api/analyze-stock";
+  };
+  "routes/api.run-report.ts": {
+    id: "routes/api.run-report";
+    page: "/api/run-report";
+  };
+  "routes/login.tsx": {
+    id: "routes/login";
+    page: "/login";
+  };
+  "routes/register.tsx": {
+    id: "routes/register";
+    page: "/register";
+  };
+  "routes/portfolio.tsx": {
+    id: "routes/portfolio";
+    page: "/portfolio";
+  };
+  "routes/settings.tsx": {
+    id: "routes/settings";
+    page: "/settings";
+  };
 };
 
 type RouteModules = {
   "root": typeof import("./app/root.tsx");
   "routes/home": typeof import("./app/routes/home.tsx");
+  "routes/dashboard": typeof import("./app/routes/dashboard.tsx");
+  "routes/stock-analysis": typeof import("./app/routes/stock-analysis.tsx");
   "routes/api.top50": typeof import("./app/routes/api.top50.ts");
   "routes/api.stock": typeof import("./app/routes/api.stock.ts");
   "routes/api.gemini": typeof import("./app/routes/api.gemini.ts");
+  "routes/api.logout": typeof import("./app/routes/api.logout.ts");
+  "routes/api.test-telegram": typeof import("./app/routes/api.test-telegram.ts");
+  "routes/api.test-slack": typeof import("./app/routes/api.test-slack.ts");
+  "routes/api.test-strategy": typeof import("./app/routes/api.test-strategy.ts");
+  "routes/api.test-crypto": typeof import("./app/routes/api.test-crypto.ts");
+  "routes/api.portfolio": typeof import("./app/routes/api.portfolio.ts");
+  "routes/api.analyze-stock": typeof import("./app/routes/api.analyze-stock.ts");
+  "routes/api.run-report": typeof import("./app/routes/api.run-report.ts");
+  "routes/login": typeof import("./app/routes/login.tsx");
+  "routes/register": typeof import("./app/routes/register.tsx");
+  "routes/portfolio": typeof import("./app/routes/portfolio.tsx");
+  "routes/settings": typeof import("./app/routes/settings.tsx");
 };

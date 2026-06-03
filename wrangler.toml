@@ -8,5 +8,17 @@ assets = { directory = "./build/client" }
 enabled = true
 
 [vars]
-GEMINI_API_KEY = "AIzaSyAkZER7uIEUp3vCA1387gE5yLwPTvN1FMo"
-TWELVE_DATA_API_KEY = "d3dc21e6cdba4e3a89f0c7620d6206c4"
+# 機密變數已移至 .dev.vars，正式上線請透過 wrangler secret put 設定
+# GEMINI_API_KEY = ""
+# TWELVE_DATA_API_KEY = ""
+# MASTER_ENCRYPTION_KEY = ""
+# INVITATION_CODE = ""
+
+[[d1_databases]]
+binding = "DB"
+database_name = "crypto-analytics-db"
+database_id = "6bf9d8c7-359d-405a-b243-5669a98c614d"
+migrations_dir = "drizzle"
+
+[triggers]
+crons = ["*/15 * * * *"]
