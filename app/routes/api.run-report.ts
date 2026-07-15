@@ -1,5 +1,6 @@
 import { type LoaderFunctionArgs } from "react-router";
 import { runStockDailyStrategy } from "../services/strategyEngine";
+import { getUserId } from "../utils/auth";
 
 /**
  * 【詳細繁體中文註解】：手動觸發日報發送接口
@@ -9,6 +10,13 @@ import { runStockDailyStrategy } from "../services/strategyEngine";
 export async function loader({ context, request }: LoaderFunctionArgs) {
   try {
     const env = (context.cloudflare as any)?.env || process.env;
+
+    // 安全審查：加上權限驗證
+    const userId = await getUserId(request, env);
+    if (!userId) {
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const { searchParams } = new URL(request.url);
     const market = searchParams.get("market") === "US" ? "US" : "TW";
     const type = searchParams.get("phase") || searchParams.get("type") || "market";

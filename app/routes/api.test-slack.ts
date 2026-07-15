@@ -1,16 +1,23 @@
 import { type LoaderFunctionArgs } from "react-router";
 import { sendSlackMessage } from "../services/slackService";
+import { getUserId } from "../utils/auth";
 
 /**
  * 【詳細繁體中文註解】：Slack 整合測試接口 (升級版)
  * 支援測試預設頻道與虛擬幣專用頻道
  */
 export async function loader({ request, context }: LoaderFunctionArgs) {
-  const url = new URL(request.url);
-  const market = (url.searchParams.get("market") || url.searchParams.get("type") || "TW").toUpperCase();
-
   try {
     const env = (context.cloudflare as any)?.env || process.env;
+
+    // 安全審查：必須登入才能測試
+    const userId = await getUserId(request, env);
+    if (!userId) {
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const url = new URL(request.url);
+    const market = (url.searchParams.get("market") || url.searchParams.get("type") || "TW").toUpperCase();
     const slackToken = env.SLACK_API_TOKEN || process.env.SLACK_API_TOKEN;
     const slackChannel = env.SLACK_CHANNEL_ID || process.env.SLACK_CHANNEL_ID;
     const channelName = "預設頻道";

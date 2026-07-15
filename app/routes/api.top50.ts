@@ -1,8 +1,17 @@
 import { type LoaderFunctionArgs } from "react-router";
+import { getUserId } from "../utils/auth";
 
 // 取得前 50 大交易量股票的 Loader
-export async function loader({ request }: LoaderFunctionArgs) {
+export async function loader({ request, context }: LoaderFunctionArgs) {
   try {
+    const env = (context.cloudflare as any)?.env || process.env;
+
+    // 安全審查：加上登入驗證
+    const userId = await getUserId(request, env);
+    if (!userId) {
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const url = new URL(request.url);
     const market = url.searchParams.get("market");
     let symbols: { symbol: string; name: string }[] = [];

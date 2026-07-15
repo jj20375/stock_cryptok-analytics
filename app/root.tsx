@@ -48,12 +48,12 @@ import { users } from "./db/schema";
 import { getUserId } from "./utils/auth";
 
 export async function loader({ request, context }: LoaderFunctionArgs) {
-  const userId = await getUserId(request);
+  const env = context.cloudflare.env as any;
+  const userId = await getUserId(request, env);
   if (!userId) {
     return { user: null };
   }
 
-  const env = context.cloudflare.env as any;
   const db = drizzle(env.DB);
   const user = await db.select().from(users).where(eq(users.id, userId)).get();
 

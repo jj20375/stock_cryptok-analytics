@@ -31,12 +31,12 @@ export async function action({ request, context }: ActionFunctionArgs) {
   }
 
   // 建立登入 Session
-  const session = await getSession(request);
+  const session = await getSession(request, env);
   session.set("userId", user.id);
 
   return redirect("/settings", {
     headers: {
-      "Set-Cookie": await commitSession(session),
+      "Set-Cookie": await commitSession(session, env),
     },
   });
 }

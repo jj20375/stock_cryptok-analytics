@@ -25,25 +25,28 @@ const sanitizeInteger = (value: FormDataEntryValue | null, fallback: number, min
 };
 
 export async function loader({ request, context }: LoaderFunctionArgs) {
-  const userId = await getUserId(request);
+  const env = context.cloudflare.env as any;
+  
+  // 安全審查：取得動態金鑰驗證 Session
+  const userId = await getUserId(request, env);
   if (!userId) {
     return redirect("/login");
   }
 
-  const env = context.cloudflare.env as any;
   const db = drizzle(env.DB);
-  const masterKey = env.MASTER_ENCRYPTION_KEY;
-
   const user = await db.select().from(users).where(eq(users.id, userId)).get();
   if (!user) {
     return redirect("/login");
   }
 
-  // 解密可供前端顯示的資料
-  const telegramBotToken = user.telegramBotToken ? await decryptData(user.telegramBotToken, masterKey) : "";
-  const telegramChatId = user.telegramChatId ? await decryptData(user.telegramChatId, masterKey) : "";
+  // 【詳細繁體中文註解】：防堵明文金鑰洩漏
+  // 不再解密 API Key 及 Token 的明文回傳給前端，僅回傳遮罩標記以供 UI placeholder 顯示。
+  const telegramBotToken = user.telegramBotToken ? "••••••••••••••••" : "";
+  const telegramChatId = user.telegramChatId ? "••••••••••••••••" : "";
+  const binanceApiKey = user.binanceApiKey ? "••••••••••••••••" : "";
+  const pionexApiKey = user.pionexApiKey ? "••••••••••••••••" : "";
 
-  // 【詳細繁體中文註解】：將使用者自訂的策略時間週期帶給前端
+  // 【詳細繁體中文註解】：將使用者自訂的策略時間週期與基本設定帶給前端
   return {
     telegramBotToken,
     telegramChatId,
@@ -60,16 +63,18 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     liveTradingEnabled: user.liveTradingEnabled ?? false,
     hasBinance: !!user.binanceApiKey && !!user.binanceApiSecret,
     hasPionex: !!user.pionexApiKey && !!user.pionexApiSecret,
-    binanceApiKey: user.binanceApiKey ? await decryptData(user.binanceApiKey, masterKey) : "",
-    pionexApiKey: user.pionexApiKey ? await decryptData(user.pionexApiKey, masterKey) : "",
+    binanceApiKey,
+    pionexApiKey,
   };
 }
 
 export async function action({ request, context }: ActionFunctionArgs) {
-  const userId = await getUserId(request);
+  const env = context.cloudflare.env as any;
+  
+  // 安全審查：取得動態金鑰驗證 Session
+  const userId = await getUserId(request, env);
   if (!userId) return redirect("/login");
 
-  const env = context.cloudflare.env as any;
   const db = drizzle(env.DB);
   const masterKey = env.MASTER_ENCRYPTION_KEY;
 
@@ -102,21 +107,35 @@ export async function action({ request, context }: ActionFunctionArgs) {
   const tBotToken = formData.get("telegramBotToken") as string;
   const tChatId = formData.get("telegramChatId") as string;
   
-  if (tBotToken !== null) updateData.telegramBotToken = await encryptData(tBotToken, masterKey);
-  if (tChatId !== null) updateData.telegramChatId = await encryptData(tChatId, masterKey);
+  // 【詳細繁體中文註解】：安全檢查遮蔽狀態
+  // 若使用者送出的值是預設的遮罩（••••••••••••••••），表示未修改該欄位，則不予覆蓋。
+  if (tBotToken !== null && tBotToken !== "••••••••••••••••") {
+    updateData.telegramBotToken = tBotToken ? await encryptData(tBotToken, masterKey) : null;
+  }
+  if (tChatId !== null && tChatId !== "••••••••••••••••") {
+    updateData.telegramChatId = tChatId ? await encryptData(tChatId, masterKey) : null;
+  }
 
   const bApiKey = formData.get("binanceApiKey") as string;
   const bApiSecret = formData.get("binanceApiSecret") as string;
   
-  if (bApiKey) updateData.binanceApiKey = await encryptData(bApiKey, masterKey);
+  if (bApiKey !== null && bApiKey !== "••••••••••••••••") {
+    updateData.binanceApiKey = bApiKey ? await encryptData(bApiKey, masterKey) : null;
+  }
   // 如果使用者沒有填新的 Secret，就不更新（保留原本的）
-  if (bApiSecret) updateData.binanceApiSecret = await encryptData(bApiSecret, masterKey);
+  if (bApiSecret) {
+    updateData.binanceApiSecret = await encryptData(bApiSecret, masterKey);
+  }
 
   const pApiKey = formData.get("pionexApiKey") as string;
   const pApiSecret = formData.get("pionexApiSecret") as string;
   
-  if (pApiKey) updateData.pionexApiKey = await encryptData(pApiKey, masterKey);
-  if (pApiSecret) updateData.pionexApiSecret = await encryptData(pApiSecret, masterKey);
+  if (pApiKey !== null && pApiKey !== "••••••••••••••••") {
+    updateData.pionexApiKey = pApiKey ? await encryptData(pApiKey, masterKey) : null;
+  }
+  if (pApiSecret) {
+    updateData.pionexApiSecret = await encryptData(pApiSecret, masterKey);
+  }
 
   // 如果有資料要更新
   if (Object.keys(updateData).length > 0) {

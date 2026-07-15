@@ -1,8 +1,17 @@
 import { type LoaderFunctionArgs } from "react-router";
+import { getUserId } from "../utils/auth";
 
 // 代理 Yahoo Finance 的報價 Loader
-export async function loader({ request, params }: LoaderFunctionArgs) {
+export async function loader({ request, params, context }: LoaderFunctionArgs) {
   try {
+    const env = (context.cloudflare as any)?.env || process.env;
+
+    // 安全審查：必須登入才能查詢個股報價
+    const userId = await getUserId(request, env);
+    if (!userId) {
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const symbol = params["*"];
     if (!symbol) {
       return Response.json({ error: "Missing symbol" }, { status: 400 });

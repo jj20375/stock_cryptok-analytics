@@ -9,7 +9,8 @@ import { fetchPriceFromServer } from "../services/stockService";
  * 【詳細繁體中文註解】：處理使用者持股清單的讀取 (GET)
  */
 export async function loader({ request, context }: LoaderFunctionArgs) {
-  const session = await getSession(request);
+  const env = (context.cloudflare as any)?.env || process.env;
+  const session = await getSession(request, env);
   const userId = session.get("userId");
 
   if (!userId) {
@@ -17,7 +18,6 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   }
 
   try {
-    const env = (context.cloudflare as any).env;
     const db = drizzle(env.DB);
 
     const portfolioRaw = await db
@@ -43,14 +43,14 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
  * 【詳細繁體中文註解】：處理使用者持股的新增 (POST)、更新 (PUT) 與刪除 (DELETE)
  */
 export async function action({ request, context }: ActionFunctionArgs) {
-  const session = await getSession(request);
+  const env = (context.cloudflare as any)?.env || process.env;
+  const session = await getSession(request, env);
   const userId = session.get("userId");
 
   if (!userId) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const env = (context.cloudflare as any).env;
   const db = drizzle(env.DB);
 
   if (request.method === "POST") {

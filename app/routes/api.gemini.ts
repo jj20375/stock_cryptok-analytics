@@ -1,6 +1,7 @@
 import { type ActionFunctionArgs } from "react-router";
 import { getAIResponse } from "../services/aiService";
 import { Type } from "@google/genai";
+import { getUserId } from "../utils/auth";
 
 // 處理來自前端的 AI 請求
 export async function action({ request, context }: ActionFunctionArgs) {
@@ -9,8 +10,15 @@ export async function action({ request, context }: ActionFunctionArgs) {
   }
 
   try {
-    const data = await request.json();
     const env = (context.cloudflare as any)?.env || process.env;
+
+    // 安全審查：加上權限防護，避免 Gemini API 被盜刷
+    const userId = await getUserId(request, env);
+    if (!userId) {
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const data = await request.json();
 
     // 定義對應不同 Request 類型的 Schema，確保 Gemini 輸出格式穩定
     let responseSchema: any = undefined;

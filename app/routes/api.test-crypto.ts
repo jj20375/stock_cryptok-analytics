@@ -2,6 +2,7 @@ import { type LoaderFunctionArgs } from "react-router";
 import { evaluateCryptoStrategy } from "../services/stockService";
 import { getAIResponse } from "../services/aiService";
 import { sendSlackMessage } from "../services/slackService";
+import { getUserId } from "../utils/auth";
 
 /**
  * 【詳細繁體中文註解】：測試虛擬幣 AI 策略
@@ -10,9 +11,16 @@ import { sendSlackMessage } from "../services/slackService";
 export async function loader({ request, context }: LoaderFunctionArgs) {
   try {
     const env = (context.cloudflare as any)?.env || process.env;
+
+    // 安全審查：限制必須登入後才能觸發
+    const userId = await getUserId(request, env);
+    if (!userId) {
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const url = new URL(request.url);
     const symbol = url.searchParams.get("symbol") || "BTCUSDT";
-
+    
     console.log(`🧪 [Test Crypto] 開始測試 ${symbol}...`);
 
     const analysis = await evaluateCryptoStrategy(symbol, '4h');

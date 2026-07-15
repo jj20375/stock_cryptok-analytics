@@ -68,39 +68,58 @@ export async function verifyPassword(password: string, storedHash: string): Prom
 }
 
 // ==========================================
-// Session 管理 (登入狀態)
+// Session 管理 (登入狀態) - 改為動態取得環境變數以防偽造
 // ==========================================
 
-export const sessionStorage = createCookieSessionStorage({
-  cookie: {
-    name: "__crypto_session",
-    httpOnly: true,
-    path: "/",
-    sameSite: "lax",
-    secrets: ["s3cr3t_auth_k3y_for_s3ssion"], // 理想情況下應透過環境變數傳入，此處為求方便寫死
-    secure: true, // 在生產環境與 localhost HTTPS 皆可運作
-    maxAge: 60 * 60 * 24 * 7, // Session 存活 7 天
-  },
-});
+let _sessionStorage: any = null;
 
-export async function getSession(request: Request) {
+/**
+ * 【詳細繁體中文註解】：動態初始化 Session Cookie Storage 實例
+ * 避免將 Session 簽名金鑰 (secret) 寫死在原始碼中。若未設定環境變數，系統將印出警告並提供安全後備。
+ * @param env 來自 Cloudflare Context 或 Process 的環境變數物件
+ */
+function getSessionStorage(env: any) {
+  if (_sessionStorage) return _sessionStorage;
+
+  // 優先從 Cloudflare worker env 讀取，其次從 node process.env 讀取
+  const secret = env?.SESSION_SECRET || (typeof process !== "undefined" ? process.env?.SESSION_SECRET : null) || "s3cr3t_auth_k3y_for_s3ssion";
+
+  if (!env?.SESSION_SECRET && (typeof process === "undefined" || !process.env?.SESSION_SECRET)) {
+    console.warn("⚠️ [Security Warning] 未設定環境變數 SESSION_SECRET，正在使用預設簽名密鑰！這在生產環境極度危險！");
+  }
+
+  _sessionStorage = createCookieSessionStorage({
+    cookie: {
+      name: "__crypto_session",
+      httpOnly: true,
+      path: "/",
+      sameSite: "lax",
+      secrets: [secret],
+      secure: true, // 在生產環境與 localhost HTTPS 皆可運作
+      maxAge: 60 * 60 * 24 * 7, // Session 存活 7 天
+    },
+  });
+  return _sessionStorage;
+}
+
+export async function getSession(request: Request, env: any) {
   const cookie = request.headers.get("Cookie");
-  return sessionStorage.getSession(cookie);
+  return getSessionStorage(env).getSession(cookie);
 }
 
-export async function commitSession(session: any) {
-  return sessionStorage.commitSession(session);
+export async function commitSession(session: any, env: any) {
+  return getSessionStorage(env).commitSession(session);
 }
 
-export async function destroySession(session: any) {
-  return sessionStorage.destroySession(session);
+export async function destroySession(session: any, env: any) {
+  return getSessionStorage(env).destroySession(session);
 }
 
 /**
  * 取得當前登入使用者的 ID，如果未登入則回傳 null
  */
-export async function getUserId(request: Request): Promise<number | null> {
-  const session = await getSession(request);
+export async function getUserId(request: Request, env: any): Promise<number | null> {
+  const session = await getSession(request, env);
   const userId = session.get("userId");
   if (!userId) return null;
   return Number(userId);

@@ -10,12 +10,12 @@ export async function action({ request, context }: ActionFunctionArgs) {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
   }
 
-  const userId = await getUserId(request);
+  const env = context.cloudflare.env as any;
+  const userId = await getUserId(request, env);
   if (!userId) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const env = context.cloudflare.env as any;
   const db = drizzle(env.DB);
   const masterKey = env.MASTER_ENCRYPTION_KEY;
 

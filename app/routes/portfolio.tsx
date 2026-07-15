@@ -44,14 +44,14 @@ import { cn } from "../utils/cn";
 // 【詳細繁體中文註解】：載入持股資料與即時價格，包含手續費
 export async function loader({ request, context }: LoaderFunctionArgs) {
   try {
-    const session = await getSession(request);
+    const env = (context.cloudflare as any)?.env || (process as any).env;
+    const session = await getSession(request, env);
     const userId = session.get("userId");
 
     if (!userId) {
       throw new Response("Unauthorized", { status: 401 });
     }
 
-    const env = (context.cloudflare as any)?.env || (process as any).env;
     if (!env || !env.DB) {
       return { error: "資料庫連線未就緒，請檢查 Cloudflare D1 設定。", portfolio: [], userEmail: "" };
     }

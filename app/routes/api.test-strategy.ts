@@ -1,8 +1,15 @@
 import { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { runStrategyEngine } from "../services/strategyEngine";
+import { getUserId } from "../utils/auth";
 
 export async function loader({ request, context }: LoaderFunctionArgs) {
   const env = context.cloudflare.env as any;
+  
+  // 安全審查：加上管理員驗證
+  const userId = await getUserId(request, env);
+  if (!userId) {
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
   
   // 為了方便測試，手動觸發策略引擎
   // 實際上，這在正式環境是由 Cloudflare Cron Triggers 自動觸發的
