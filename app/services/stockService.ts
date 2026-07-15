@@ -958,6 +958,176 @@ export const fetchStockPeers = async (symbol: string): Promise<string[]> => {
   }
 };
 
+export const evaluateTrendMomentumData = (
+  data: StockDataPoint[]
+): {
+  isTriggered: boolean;
+  reasons: string[];
+  score: number;
+  trend: 'up' | 'down';
+} => {
+  if (data.length < 20) {
+    return { isTriggered: false, reasons: ['數據不足'], score: 0, trend: 'down' };
+  }
+
+  const latest = data[data.length - 1];
+  const prev = data[data.length - 2];
+  const reasons: string[] = [];
+  let score = 0;
+
+  const trend = latest.ma20 && prev.ma20
+    ? latest.ma20 > prev.ma20
+      ? 'up'
+      : 'down'
+    : latest.close >= prev.close
+      ? 'up'
+      : 'down';
+
+  const isAboveMA20 = latest.ma20 ? latest.close > latest.ma20 : false;
+  const isAboveEMA26 = latest.emaLong ? latest.close > latest.emaLong : false;
+
+  if (isAboveMA20 || isAboveEMA26) {
+    score += 40;
+    reasons.push('中期趨勢向上');
+
+    if (typeof latest.rsi === 'number' && latest.rsi < 55 && latest.rsi > 35) {
+      score += 30;
+      reasons.push('指標健康回調');
+    }
+
+    if (latest.ma20 && latest.ma20 !== 0) {
+      const distToMA20 = Math.abs(latest.close - latest.ma20) / latest.ma20;
+      if (distToMA20 < 0.03 && latest.close >= latest.ma20) {
+        score += 30;
+        reasons.push('回測均線支撐');
+      }
+    }
+  } else if (prev.ma20 && prev.close <= prev.ma20 && latest.ma20 && latest.close > latest.ma20) {
+    score += 50;
+    reasons.push('強勢站上月線');
+  }
+
+  if (typeof latest.rsi === 'number' && latest.rsi < 45) {
+    score += 10;
+    reasons.push('RSI 仍在可布局區');
+  }
+
+  if (
+    typeof latest.macdHist === 'number' &&
+    typeof prev.macdHist === 'number' &&
+    latest.macdHist > prev.macdHist
+  ) {
+    score += 15;
+    reasons.push('MACD 動能轉強');
+  }
+
+  if (
+    typeof latest.k === 'number' &&
+    typeof latest.d === 'number' &&
+    typeof prev.k === 'number' &&
+    typeof prev.d === 'number' &&
+    prev.k <= prev.d &&
+    latest.k > latest.d
+  ) {
+    score += 10;
+    reasons.push('KD 黃金交叉');
+  }
+
+  return {
+    isTriggered: score >= 40,
+    reasons: reasons.length > 0 ? reasons : ['趨勢條件不明確'],
+    score,
+    trend,
+  };
+};
+
+export const evaluateConsecutiveVolumeData = (
+  data: StockDataPoint[],
+  multiplier: number = 1.5
+): {
+  isTriggered: boolean;
+  reasons: string[];
+  currentVolume: number;
+  avgVolume: number;
+  consecutiveDays: number;
+} => {
+  if (data.length < 10) {
+    return { isTriggered: false, reasons: ['數據不足'], currentVolume: 0, avgVolume: 0, consecutiveDays: 0 };
+  }
+
+  let consecutiveCount = 0;
+  let latestAvgVol = 0;
+
+  for (let i = data.length - 1; i >= 5; i--) {
+    const slice = data.slice(i - 5, i);
+    const avgVol = slice.reduce((sum, d) => sum + d.volume, 0) / 5;
+
+    if (i === data.length - 1) {
+      latestAvgVol = avgVol;
+    }
+
+    if (data[i].volume > avgVol * multiplier) {
+      consecutiveCount++;
+    } else {
+      break;
+    }
+  }
+
+  const isTriggered = consecutiveCount >= 2;
+  const reasons: string[] = [];
+  if (isTriggered) {
+    reasons.push(`量能連續 ${consecutiveCount} 期放大 (${multiplier} 倍以上)`);
+  }
+
+  return {
+    isTriggered,
+    reasons,
+    currentVolume: data[data.length - 1].volume,
+    avgVolume: latestAvgVol,
+    consecutiveDays: consecutiveCount
+  };
+};
+
+export const evaluateVolumeNoBreakoutData = (
+  data: StockDataPoint[],
+  multiplier: number = 1.5
+): {
+  isTriggered: boolean;
+  reasons: string[];
+  currentVolume: number;
+  avgVolume: number;
+  currentPrice: number;
+  prevHigh: number;
+} => {
+  if (data.length < 6) {
+    return { isTriggered: false, reasons: ['數據不足'], currentVolume: 0, avgVolume: 0, currentPrice: 0, prevHigh: 0 };
+  }
+
+  const current = data[data.length - 1];
+  const prev = data[data.length - 2];
+  const history5D = data.slice(data.length - 6, data.length - 1);
+  const avgVolume5D = history5D.reduce((sum, d) => sum + d.volume, 0) / 5;
+
+  const hasVolume = current.volume > avgVolume5D * multiplier;
+  const noBreakout = current.high <= prev.high;
+  const isTriggered = hasVolume && noBreakout;
+  const reasons: string[] = [];
+
+  if (isTriggered) {
+    const volMultiple = (current.volume / avgVolume5D).toFixed(1);
+    reasons.push(`爆量未過高 (量能達 ${volMultiple} 倍，但最高價 $${current.high} 未突破前高 $${prev.high})`);
+  }
+
+  return {
+    isTriggered,
+    reasons,
+    currentVolume: current.volume,
+    avgVolume: avgVolume5D,
+    currentPrice: current.close,
+    prevHigh: prev.high
+  };
+};
+
 /**
  * 【詳細繁體中文註解】：評估「連續兩天/期以上有量能」的策略
  * 邏輯：
@@ -981,46 +1151,8 @@ export const evaluateConsecutiveVolume = async (
   consecutiveDays: number;
 }> => {
   try {
-    // 抓取足夠的歷史數據以計算移動平均 (抓取 60 期)
     const { data } = await fetchStockData(symbol, 60, interval);
-    if (data.length < 10) {
-      return { isTriggered: false, reasons: ["數據不足"], currentVolume: 0, avgVolume: 0, consecutiveDays: 0 };
-    }
-
-    let consecutiveCount = 0;
-    let latestAvgVol = 0;
-
-    // 從最新的一期往前掃描，檢查連續爆量的期數
-    for (let i = data.length - 1; i >= 5; i--) {
-      const slice = data.slice(i - 5, i);
-      const avgVol = slice.reduce((sum, d) => sum + d.volume, 0) / 5;
-      
-      if (i === data.length - 1) {
-        latestAvgVol = avgVol;
-      }
-
-      // 檢查成交量是否大於 5 期平均成交量的指定倍數
-      if (data[i].volume > avgVol * multiplier) {
-        consecutiveCount++;
-      } else {
-        break;
-      }
-    }
-
-    // 觸發條件為連續 2 期以上符合爆量標準
-    const isTriggered = consecutiveCount >= 2;
-    const reasons: string[] = [];
-    if (isTriggered) {
-      reasons.push(`量能連續 ${consecutiveCount} 期放大 (${multiplier} 倍以上)`);
-    }
-
-    return {
-      isTriggered,
-      reasons,
-      currentVolume: data[data.length - 1].volume,
-      avgVolume: latestAvgVol,
-      consecutiveDays: consecutiveCount
-    };
+    return evaluateConsecutiveVolumeData(data, multiplier);
   } catch (error) {
     console.error(`[StockService] 評估連續爆量失敗 (${symbol}):`, error);
     return { isTriggered: false, reasons: ["評估異常"], currentVolume: 0, avgVolume: 0, consecutiveDays: 0 };
@@ -1052,37 +1184,7 @@ export const evaluateVolumeNoBreakout = async (
 }> => {
   try {
     const { data } = await fetchStockData(symbol, 30, interval);
-    if (data.length < 6) {
-      return { isTriggered: false, reasons: ["數據不足"], currentVolume: 0, avgVolume: 0, currentPrice: 0, prevHigh: 0 };
-    }
-
-    const current = data[data.length - 1];
-    const prev = data[data.length - 2];
-
-    const history5D = data.slice(data.length - 6, data.length - 1);
-    const avgVolume5D = history5D.reduce((sum, d) => sum + d.volume, 0) / 5;
-
-    // 檢查是否有量能
-    const hasVolume = current.volume > avgVolume5D * multiplier;
-    
-    // 檢查是否未突破前一期高點
-    const noBreakout = current.high <= prev.high;
-
-    const isTriggered = hasVolume && noBreakout;
-    const reasons: string[] = [];
-    if (isTriggered) {
-      const volMultiple = (current.volume / avgVolume5D).toFixed(1);
-      reasons.push(`爆量未過高 (量能達 ${volMultiple} 倍，但最高價 $${current.high} 未突破前高 $${prev.high})`);
-    }
-
-    return {
-      isTriggered,
-      reasons,
-      currentVolume: current.volume,
-      avgVolume: avgVolume5D,
-      currentPrice: current.close,
-      prevHigh: prev.high
-    };
+    return evaluateVolumeNoBreakoutData(data, multiplier);
   } catch (error) {
     console.error(`[StockService] 評估爆量未突破高點失敗 (${symbol}):`, error);
     return { isTriggered: false, reasons: ["評估異常"], currentVolume: 0, avgVolume: 0, currentPrice: 0, prevHigh: 0 };

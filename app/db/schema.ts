@@ -26,6 +26,17 @@ export const users = sqliteTable('users', {
   
   // 【詳細繁體中文註解】：策略盯盤參考的 K 線週期，支援 '5m', '15m', '1h', '4h'
   strategyTimeframe: text('strategy_timeframe').default('4h').notNull(),
+
+  // 本金保護設定
+  capitalBaseUsdt: text('capital_base_usdt').default('1000').notNull(),
+  maxRiskPerTradePct: text('max_risk_per_trade_pct').default('0.5').notNull(),
+  maxDailyLossPct: text('max_daily_loss_pct').default('1').notNull(),
+  maxPositionSizePct: text('max_position_size_pct').default('10').notNull(),
+  riskStopLossPct: text('risk_stop_loss_pct').default('5').notNull(),
+  maxOpenPositions: integer('max_open_positions').default(2).notNull(),
+  maxTradesPerDay: integer('max_trades_per_day').default(3).notNull(),
+  cryptoCrashGuardEnabled: integer('crypto_crash_guard_enabled', { mode: 'boolean' }).default(true).notNull(),
+  liveTradingEnabled: integer('live_trading_enabled', { mode: 'boolean' }).default(false).notNull(),
 });
 
 // 【詳細繁體中文註解】：交易紀錄表 (包含模擬與實戰)
@@ -48,6 +59,7 @@ export const paperTrades = sqliteTable('paper_trades', {
   amount: text('amount').notNull(), // 虛擬購買的數量
   
   // 出場價格與損益
+  stopLossPrice: text('stop_loss_price'),
   exitPrice: text('exit_price'),
   pnl: text('pnl'), // 損益金額 (USDT)
   

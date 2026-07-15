@@ -1,5 +1,5 @@
 import { type LoaderFunctionArgs } from "react-router";
-import { runStrategyEngine } from "../services/strategyEngine";
+import { runStockDailyStrategy } from "../services/strategyEngine";
 
 /**
  * 【詳細繁體中文註解】：手動觸發日報發送接口
@@ -10,11 +10,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   try {
     const env = (context.cloudflare as any)?.env || process.env;
     const { searchParams } = new URL(request.url);
-    const type = searchParams.get("type") || "all";
+    const market = searchParams.get("market") === "US" ? "US" : "TW";
+    const type = searchParams.get("phase") || searchParams.get("type") || "market";
     
-    console.log(`🛠️ [Manual Trigger] 正在手動觸發日報發送 (${type})...`);
-    
-    const { runStockDailyStrategy } = await import('../services/strategyEngine');
+    console.log(`🛠️ [Manual Trigger] 正在手動觸發日報發送 (${market} / ${type})...`);
     
     if (!env.DB) {
       return Response.json({ 
@@ -23,11 +22,16 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       }, { status: 500 });
     }
 
-    await runStockDailyStrategy(env, type);
+    const normalizedPhase = type === "strategy" || type === "surge" ? "strategy" : "market";
+    await runStockDailyStrategy(env, market, normalizedPhase);
+
+    const reportLabel = normalizedPhase === 'market'
+      ? "市場摘要"
+      : "AI 三模式策略批次分析";
 
     return Response.json({ 
       success: true, 
-      message: `${type === 'market' ? '市場摘要' : (type === 'strategy' ? '策略分析' : '完整日報')}任務已成功執行！`,
+      message: `${market === "TW" ? "台股" : "美股"} ${reportLabel}任務已成功執行！`,
       timestamp: new Date().toISOString()
     });
   } catch (error: any) {

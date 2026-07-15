@@ -1,15 +1,14 @@
 import { drizzle } from "drizzle-orm/d1";
-import { eq, and } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { users, paperTrades } from "../db/schema";
 import { decryptData } from "../utils/encryption";
 import { getKlines, placeTestOrder } from "./binanceService";
-import { sendTelegramMessage } from "./telegramService";
 import { sendSlackMessage } from "./slackService";
-import { calculateRSI, calculateMA, evaluateDailyVolumeSurge, evaluateBigFishStrategy, evaluatePerfectOrder, evaluateCryptoStrategy, evaluateVolumeNoPriceRise } from "./stockService";
+import { calculateRSI, calculateMA, evaluateCryptoStrategy, fetchStockData, evaluateTrendMomentumData, evaluateConsecutiveVolumeData, evaluateVolumeNoBreakoutData } from "./stockService";
 import { getAIResponse } from "./aiService";
-
-// 每次模擬下單的 USDT 金額
-const SIMULATED_USDT_AMOUNT = 100;
+import { evaluateCryptoMarketRegime } from "./cryptoMarketRegime";
+import { calculateRiskBasedPosition } from "./positionSizing";
+import { evaluateCapitalRisk } from "./riskGuard";
 
 // 【詳細繁體中文註解】：定義支援的幣種及其數量精確度（Decimals）
 const SYMBOL_PRECISION: Record<string, number> = {
@@ -25,8 +24,160 @@ const SYMBOL_PRECISION: Record<string, number> = {
 
 const SYMBOLS = Object.keys(SYMBOL_PRECISION);
 
+const truncateText = (text: string, maxLength = 120) => {
+  if (!text) return "";
+  return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text;
+};
+
+type DailyStrategyMode = "trend" | "consecutive_volume" | "volume_no_break";
+
+type DailyModeCandidate = {
+  symbol: string;
+  name: string;
+  score: number;
+  reason: string;
+  trend: "up" | "down";
+};
+
+const DAILY_MODE_META: Record<DailyStrategyMode, {
+  title: string;
+  description: string;
+  trendHint: string;
+}> = {
+  trend: {
+    title: "多空趨勢強勢追蹤",
+    description: "結合 RSI、MACD、KD 與均線位置，找出趨勢向上且仍保有回調切入空間的標的。",
+    trendHint: "偏向順勢、找回調",
+  },
+  consecutive_volume: {
+    title: "量能連續兩期以上放大",
+    description: "鎖定成交量連續放大，代表資金持續關注與可能的主力吸籌。",
+    trendHint: "偏向量能持續堆疊",
+  },
+  volume_no_break: {
+    title: "量增但未突破前高",
+    description: "觀察爆量後仍受前高壓制的標的，辨識洗盤、箱型與出貨壓力。",
+    trendHint: "偏向區間整理與壓力觀察",
+  },
+};
+
+const resolveSlackChannel = (env: any) => {
+  return env.SLACK_CHANNEL_ID || process.env.SLACK_CHANNEL_ID;
+};
+
+const formatTopCandidates = (candidates: DailyModeCandidate[], emptyText: string) => {
+  if (candidates.length === 0) return `> ${emptyText}`;
+
+  return candidates.slice(0, 5).map((candidate, index) => {
+    const trendLabel = candidate.trend === "up" ? "偏多" : "偏空";
+    return `> ${index + 1}. *${candidate.name}* (${candidate.symbol}) ｜ 分數 *${candidate.score}* ｜ ${trendLabel}\n>   └ ${candidate.reason}`;
+  }).join("\n");
+};
+
+const buildModeInsight = async (
+  env: any,
+  marketLabel: string,
+  mode: DailyStrategyMode,
+  candidates: DailyModeCandidate[]
+) => {
+  const meta = DAILY_MODE_META[mode];
+  if (candidates.length === 0) {
+    return "暫無明確候選，維持觀察即可。";
+  }
+
+  try {
+    const prompt = `
+你是一位資深${marketLabel}日報分析師。請針對「${meta.title}」這個策略模式，整理下面這批候選標的的共通點與風險。
+
+市場：${marketLabel}
+策略重點：${meta.description}
+候選標的：
+${JSON.stringify(candidates.slice(0, 5).map(item => ({
+  symbol: item.symbol,
+  name: item.name,
+  score: item.score,
+  reason: item.reason,
+})), null, 2)}
+
+請用繁體中文輸出 2 句短評：
+1. 第一句總結這批標的最核心的共同特徵。
+2. 第二句說明最值得追蹤的確認條件或風險。
+字數控制在 120 字內，不要使用條列。
+`;
+
+    const aiText = await getAIResponse(prompt, {}, env);
+    return truncateText(aiText?.trim() || "", 140) || "暫無明確候選，維持觀察即可。";
+  } catch (error) {
+    console.error(`❌ [Daily Mode Insight] ${mode} AI 摘要失敗:`, error);
+    return "AI 摘要暫時無法產出，先以候選清單為主。";
+  }
+};
+
+const scanDailyModes = async (symbols: any[], market: "TW" | "US") => {
+  const scanLimit = Math.min(symbols.length, 15);
+  const buckets: Record<DailyStrategyMode, DailyModeCandidate[]> = {
+    trend: [],
+    consecutive_volume: [],
+    volume_no_break: [],
+  };
+
+  console.log(`🔍 [${market}] 開始掃描前 ${scanLimit} 檔候選，彙整 3 種模式...`);
+
+  for (const stock of symbols.slice(0, scanLimit)) {
+    try {
+      const { data } = await fetchStockData(stock.symbol, 60, "1d");
+      if (data.length < 20) continue;
+
+      const trend = evaluateTrendMomentumData(data);
+      const consecutiveVolume = evaluateConsecutiveVolumeData(data, 1.5);
+      const volumeNoBreakout = evaluateVolumeNoBreakoutData(data, 1.5);
+
+      if (trend.isTriggered) {
+        buckets.trend.push({
+          symbol: stock.symbol,
+          name: stock.name,
+          score: trend.score,
+          reason: trend.reasons.join("、"),
+          trend: trend.trend,
+        });
+      }
+
+      if (consecutiveVolume.isTriggered) {
+        buckets.consecutive_volume.push({
+          symbol: stock.symbol,
+          name: stock.name,
+          score: Math.min(100, 50 + consecutiveVolume.consecutiveDays * 15),
+          reason: consecutiveVolume.reasons.join("、"),
+          trend: "up",
+        });
+      }
+
+      if (volumeNoBreakout.isTriggered) {
+        buckets.volume_no_break.push({
+          symbol: stock.symbol,
+          name: stock.name,
+          score: 75,
+          reason: volumeNoBreakout.reasons.join("、"),
+          trend: "down",
+        });
+      }
+    } catch (error) {
+      console.error(`❌ [${market} Scan] ${stock.symbol} 掃描失敗:`, error);
+    }
+
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+
+  (Object.keys(buckets) as DailyStrategyMode[]).forEach(mode => {
+    buckets[mode] = buckets[mode]
+      .sort((a, b) => b.score - a.score || b.symbol.localeCompare(a.symbol));
+  });
+
+  return buckets;
+};
+
 export const runStrategyEngine = async (env: any) => {
-  console.log("🚀 [Strategy Engine] 開始執行定時策略檢查...");
+  console.log("🚀 [Strategy Engine] 開始執行 crypto 定時策略檢查...");
   const db = drizzle(env.DB);
   const masterKey = env.MASTER_ENCRYPTION_KEY;
 
@@ -36,6 +187,11 @@ export const runStrategyEngine = async (env: any) => {
     
     for (const user of targetUsers) {
       const userTimeframe = user.strategyTimeframe || '15m';
+      let userTrades = await db.select()
+        .from(paperTrades)
+        .where(eq(paperTrades.userId, user.id))
+        .all();
+
       for (const symbol of SYMBOLS) {
         try {
           const klines = await getKlines(symbol, userTimeframe as any, 100);
@@ -49,54 +205,109 @@ export const runStrategyEngine = async (env: any) => {
           const currentMA20 = ma20List[ma20List.length - 1];
 
           const isEntrySignal = currentRSI < 20 && currentPrice < currentMA20 * 0.90;
-          const isExitSignal = currentPrice >= currentMA20;
-
-          const openTrade = await db.select()
-            .from(paperTrades)
-            .where(and(
-              eq(paperTrades.userId, user.id),
-              eq(paperTrades.symbol, symbol),
-              eq(paperTrades.status, "OPEN")
-            ))
-            .get();
+          const openTrade = userTrades.find(trade => trade.symbol === symbol && trade.status === "OPEN");
+          const stopLossPrice = openTrade?.stopLossPrice ? parseFloat(openTrade.stopLossPrice) : null;
+          const hitStopLoss = !!stopLossPrice && currentPrice <= stopLossPrice;
+          const isMeanReversionExit = currentPrice >= currentMA20;
+          const isExitSignal = !!openTrade && (isMeanReversionExit || hitStopLoss);
 
           const apiKey = await decryptData(user.binanceApiKey!, masterKey);
           const apiSecret = await decryptData(user.binanceApiSecret!, masterKey);
-          const telegramToken = user.telegramBotToken ? await decryptData(user.telegramBotToken, masterKey) : null;
-          const telegramChatId = user.telegramChatId ? await decryptData(user.telegramChatId, masterKey) : null;
 
           const isLive = user.tradingMode === "LIVE";
           const precision = SYMBOL_PRECISION[symbol] || 2;
-          const tradeQuantity = parseFloat((SIMULATED_USDT_AMOUNT / currentPrice).toFixed(precision));
 
           // 取得 Slack 設定 (支援虛擬幣專用頻道分流)
           const slackToken = env.SLACK_API_TOKEN || process.env.SLACK_API_TOKEN;
-          const slackChannel = env.SLACK_CRYPTO_CHANNEL_ID || env.SLACK_CHANNEL_ID || process.env.SLACK_CRYPTO_CHANNEL_ID || process.env.SLACK_CHANNEL_ID;
+          const slackChannel = resolveSlackChannel(env);
 
           if (!openTrade && isEntrySignal) {
+            const cryptoRegime = await evaluateCryptoMarketRegime(symbol);
+            const riskDecision = evaluateCapitalRisk({
+              cryptoRegime,
+              isEntrySignal,
+              isLive,
+              symbol,
+              trades: userTrades,
+              user,
+            });
+
+            if (!riskDecision.allowTrade) {
+              console.warn(`🛡️ [Risk Guard] ${symbol} 已阻擋開倉: ${riskDecision.reason}`);
+              if (slackToken && slackChannel) {
+                const msg = `*🛡️ [本金保護] 已阻擋虛擬幣開倉*\n\n` +
+                  `• 商品：*${symbol}*\n` +
+                  `• 風險等級：*${riskDecision.riskLevel}*\n` +
+                  `• 原因：${riskDecision.reason}\n` +
+                  `• 今日損益：${riskDecision.stats.dailyPnL.toFixed(2)} USDT\n` +
+                  `• 持倉數：${riskDecision.stats.openPositions}/${riskDecision.settings.maxOpenPositions}`;
+                await sendSlackMessage(slackToken, slackChannel, msg);
+              }
+              continue;
+            }
+
+            const position = calculateRiskBasedPosition({
+              capitalBaseUsdt: riskDecision.settings.capitalBaseUsdt,
+              currentPrice,
+              maxPositionSizePct: riskDecision.riskLevel === "MEDIUM"
+                ? riskDecision.settings.maxPositionSizePct * 0.5
+                : riskDecision.settings.maxPositionSizePct,
+              maxRiskPerTradePct: riskDecision.riskLevel === "MEDIUM"
+                ? riskDecision.settings.maxRiskPerTradePct * 0.5
+                : riskDecision.settings.maxRiskPerTradePct,
+              precision,
+              stopLossPct: riskDecision.settings.riskStopLossPct,
+            });
+
+            if (position.reason) {
+              console.warn(`🛡️ [Position Sizing] ${symbol} 已阻擋開倉: ${position.reason}`);
+              continue;
+            }
+
             let orderSuccess = false;
             if (isLive) {
               const { placeRealOrder } = await import('./binanceService');
-              orderSuccess = await placeRealOrder(symbol, "BUY", tradeQuantity, apiKey, apiSecret);
+              orderSuccess = await placeRealOrder(symbol, "BUY", position.quantity, apiKey, apiSecret);
             } else {
-              orderSuccess = await placeTestOrder(symbol, "BUY", tradeQuantity, apiKey, apiSecret);
+              orderSuccess = await placeTestOrder(symbol, "BUY", position.quantity, apiKey, apiSecret);
             }
             
             if (orderSuccess) {
-              await db.insert(paperTrades).values({
+              const tradeValues = {
                 userId: user.id,
                 symbol: symbol,
                 side: "BUY",
                 status: "OPEN",
                 mode: isLive ? "LIVE" : "PAPER",
                 entryPrice: currentPrice.toString(),
-                amount: tradeQuantity.toString(),
-                reason: `RSI(${userTimeframe}): ${currentRSI.toFixed(2)}, MA20: ${currentMA20.toFixed(2)}`
+                stopLossPrice: position.stopLossPrice.toString(),
+                amount: position.quantity.toString(),
+                reason: `RSI(${userTimeframe}): ${currentRSI.toFixed(2)}, MA20: ${currentMA20.toFixed(2)}, Risk: ${riskDecision.riskLevel}, SL: ${position.stopLossPrice.toFixed(4)}`
+              };
+
+              await db.insert(paperTrades).values({
+                ...tradeValues,
               }).run();
+              userTrades.push({
+                ...tradeValues,
+                id: -Date.now(),
+                exitPrice: null,
+                pnl: null,
+                createdAt: new Date().toISOString(),
+                closedAt: null,
+              } as any);
 
               // 改發送到 Slack
               if (slackToken && slackChannel) {
-                const msg = `*🚨 [虛擬幣] 極度恐慌抄底觸發*\n\n✅ *[${isLive ? "🔥 實戰" : "🧪 模擬"}]* 已買入\n• 商品：*${symbol}*\n• 價格：*$${currentPrice}*\n• 理由：${userTimeframe} RSI 超賣 (${currentRSI.toFixed(2)})`;
+                const msg = `*🚨 [虛擬幣] 風控後抄底觸發*\n\n` +
+                  `✅ *[${isLive ? "🔥 實戰" : "🧪 模擬"}]* 已買入\n` +
+                  `• 商品：*${symbol}*\n` +
+                  `• 價格：*$${currentPrice}*\n` +
+                  `• 倉位：*${position.notionalUsdt.toFixed(2)} USDT* (${position.quantity})\n` +
+                  `• 預估單筆風險：*${position.riskUsdt.toFixed(2)} USDT*\n` +
+                  `• 停損價：*$${position.stopLossPrice.toFixed(4)}*\n` +
+                  `• 風控：${riskDecision.reason}\n` +
+                  `• 理由：${userTimeframe} RSI 超賣 (${currentRSI.toFixed(2)})`;
                 await sendSlackMessage(slackToken, slackChannel, msg);
               }
             }
@@ -120,11 +331,17 @@ export const runStrategyEngine = async (env: any) => {
               await db.update(paperTrades)
                 .set({ status: "CLOSED", exitPrice: currentPrice.toString(), pnl: pnl.toFixed(2), closedAt: new Date().toISOString() })
                 .where(eq(paperTrades.id, openTrade.id)).run();
+              userTrades = userTrades.map(trade =>
+                trade.id === openTrade.id
+                  ? { ...trade, status: "CLOSED", exitPrice: currentPrice.toString(), pnl: pnl.toFixed(2), closedAt: new Date().toISOString() }
+                  : trade
+              );
 
               // 改發送到 Slack
               if (slackToken && slackChannel) {
                 const pnlEmoji = pnl >= 0 ? "💰" : "📉";
-                const msg = `*${pnlEmoji} [虛擬幣] 均線回歸平倉*\n\n✅ 已賣出 *${symbol}*\n• 績效：*${pnl.toFixed(2)} USDT*\n• 出場價：$${currentPrice}`;
+                const exitReason = hitStopLoss ? "停損保護出場" : "均線回歸平倉";
+                const msg = `*${pnlEmoji} [虛擬幣] ${exitReason}*\n\n✅ 已賣出 *${symbol}*\n• 績效：*${pnl.toFixed(2)} USDT*\n• 出場價：$${currentPrice}`;
                 await sendSlackMessage(slackToken, slackChannel, msg);
               }
             }
@@ -145,7 +362,7 @@ export const runStrategyEngine = async (env: any) => {
       'ADAUSDT', 'ZECUSDT', 'SUIUSDT', 'ASTRUSDT'
     ];
     const slackToken = env.SLACK_API_TOKEN || process.env.SLACK_API_TOKEN;
-    const slackChannel = env.SLACK_CRYPTO_CHANNEL_ID || env.SLACK_CHANNEL_ID || process.env.SLACK_CRYPTO_CHANNEL_ID || process.env.SLACK_CHANNEL_ID;
+    const slackChannel = resolveSlackChannel(env);
 
     for (const symbol of cryptoSymbols) {
       const analysis = await evaluateCryptoStrategy(symbol, '4h');
@@ -187,39 +404,6 @@ export const runStrategyEngine = async (env: any) => {
     console.error("🔥 [Crypto AI Scan] 執行失敗:", error);
   }
 
-  // --- 日報任務分流 (台北時間) ---
-  try {
-    const now = new Date();
-    const taipeiFormatter = new Intl.DateTimeFormat("zh-TW", {
-      timeZone: "Asia/Taipei",
-      hour: "numeric",
-      minute: "numeric",
-      hour12: false,
-    });
-    
-    const parts = taipeiFormatter.formatToParts(now);
-    const hours = parseInt(parts.find(p => p.type === "hour")?.value || "0");
-    const minutes = parseInt(parts.find(p => p.type === "minute")?.value || "0");
-    
-    console.log(`🕒 [Time Check] 台北時間: ${hours}:${minutes}`);
-
-    // 【台股】
-    if (hours === 15 && minutes === 0) {
-      await runStockDailyStrategy(env, "TW", "market");
-    } else if (hours === 15 && minutes === 15) {
-      await runStockDailyStrategy(env, "TW", "strategy");
-    }
-    
-    // 【美股】
-    if (hours === 4 && minutes === 30) {
-      await runStockDailyStrategy(env, "US", "market");
-    } else if (hours === 4 && minutes === 45) {
-      await runStockDailyStrategy(env, "US", "strategy");
-    }
-
-  } catch (error) {
-    console.error("🔥 [Strategy Engine] 日報分流執行失敗:", error);
-  }
 };
 
 /**
@@ -271,7 +455,7 @@ export const fetchUSMarketMovers = async (): Promise<any[]> => {
 export const runStockDailyStrategy = async (env: any, market: "TW" | "US" = "TW", type: "market" | "strategy" = "market") => {
   console.log(`🚀 [Daily Report] 開始執行 - 市場: ${market}, 階段: ${type}`);
   const slackToken = env.SLACK_API_TOKEN || process.env.SLACK_API_TOKEN;
-  const slackChannel = env.SLACK_CHANNEL_ID || process.env.SLACK_CHANNEL_ID;
+  const slackChannel = resolveSlackChannel(env);
   if (!slackToken || !slackChannel) return;
 
   try {
@@ -305,64 +489,48 @@ export const runStockDailyStrategy = async (env: any, market: "TW" | "US" = "TW"
 
     const dateStr = new Date().toLocaleDateString('zh-TW');
     const marketLabel = market === "TW" ? "台股" : "美股";
-    let slackMsg = "";
+    const topGainers = [...symbols].sort((a, b) => b.changePercent - a.changePercent).slice(0, 5);
+    const mostActive = [...symbols].sort((a, b) => b.volume - a.volume).slice(0, 5);
+    let slackMsg = `*📅 ${marketLabel}${type === "market" ? "市場日報" : "AI 三模式策略日報"} (${dateStr})*\n`;
 
     if (type === "market") {
-      slackMsg += `*📅 ${marketLabel}市場每日摘要 (${dateStr})*\n\n`;
-      slackMsg += `*🔥 漲幅領先 (Top Gainers)*\n`;
-      [...symbols].sort((a, b) => b.changePercent - a.changePercent).slice(0, 5).forEach((s, i) => 
+      slackMsg += `\n*1) 盤面概覽*\n`;
+      slackMsg += `> 漲幅領先：*${topGainers[0]?.name || "N/A"}* (${topGainers[0]?.symbol || "-"})\n`;
+      slackMsg += `> 交投活躍：*${mostActive[0]?.name || "N/A"}* (${mostActive[0]?.symbol || "-"})\n`;
+
+      slackMsg += `\n*2) 漲幅領先 Top 5*\n`;
+      topGainers.forEach((s, i) => 
         slackMsg += `> ${i+1}. *${s.name}* (${s.symbol})  漲幅: *+${s.changePercent}%*\n`
       );
-      slackMsg += `\n*📊 交投活躍 (Most Active)*\n`;
-      symbols.slice(0, 5).forEach((s, i) => 
+
+      slackMsg += `\n*3) 交投活躍 Top 5*\n`;
+      mostActive.forEach((s, i) => 
         slackMsg += `> ${i+1}. *${s.name}* (${s.symbol})  量: ${s.volume.toLocaleString()}\n`
       );
     } else {
-      // 深度策略掃描 (限制數量以符合 50 次子請求限制)
-      const scanLimit = 15; 
-      const surgeStocks = [];
-      const bigFishSignals = [];
-      const perfectOrderStocks = [];
-      const volumeUpPriceFlatStocks = [];
+      const modeBuckets = await scanDailyModes(symbols, market);
+      const trendInsight = await buildModeInsight(env, marketLabel, "trend", modeBuckets.trend);
+      const consecutiveInsight = await buildModeInsight(env, marketLabel, "consecutive_volume", modeBuckets.consecutive_volume);
+      const volumeNoBreakInsight = await buildModeInsight(env, marketLabel, "volume_no_break", modeBuckets.volume_no_break);
 
-      console.log(`🔍 [${marketLabel} Scan] 正在掃描前 ${scanLimit} 檔...`);
-      for (const s of symbols.slice(0, scanLimit)) {
-        try {
-          const [surge, bigFish, perfect, volFlat] = await Promise.all([
-            evaluateDailyVolumeSurge(s.symbol),
-            evaluateBigFishStrategy(s.symbol, '1h'),
-            evaluatePerfectOrder(s.symbol),
-            evaluateVolumeNoPriceRise(s.symbol)
-          ]);
+      slackMsg += `\n*1) 盤面概覽*\n`;
+      slackMsg += `> 漲幅領先：*${topGainers[0]?.name || "N/A"}* (${topGainers[0]?.symbol || "-"})\n`;
+      slackMsg += `> 交投活躍：*${mostActive[0]?.name || "N/A"}* (${mostActive[0]?.symbol || "-"})\n`;
 
-          if (surge.isSurge) surgeStocks.push({ ...s, multiple: surge.multiple });
-          if (bigFish.isEntry) bigFishSignals.push({ ...s, reason: bigFish.reason, price: bigFish.price });
-          if (perfect.isPerfect) perfectOrderStocks.push({ ...s });
-          if (volFlat.isTriggered) volumeUpPriceFlatStocks.push({ ...s, multiple: volFlat.multiple });
-          
-          // 稍微停頓
-          await new Promise(r => setTimeout(r, 50));
-        } catch (err) {
-          console.error(`❌ [Scan Error] ${s.symbol}:`, err);
-        }
-      }
+      slackMsg += `\n*2) ${DAILY_MODE_META.trend.title}*\n`;
+      slackMsg += `${formatTopCandidates(modeBuckets.trend, "暫無符合的趨勢型候選")}\n`;
+      slackMsg += `> AI 觀察：${trendInsight}\n`;
+      slackMsg += `> 策略特性：${DAILY_MODE_META.trend.trendHint}\n`;
 
-      slackMsg += `*🐳 ${marketLabel}策略深度分析 (${dateStr})*\n\n`;
-      
-      slackMsg += `*🐳 吃大魚訊號 (1H)*\n`;
-      bigFishSignals.length > 0 
-        ? bigFishSignals.forEach(s => slackMsg += `> 💎 ${s.name} - ${s.reason}\n`) 
-        : slackMsg += `> 暫無顯著訊號\n`;
-      
-      slackMsg += `\n*🚀 強勢爆量股*\n`;
-      surgeStocks.length > 0 
-        ? surgeStocks.sort((a, b) => b.multiple - a.multiple).slice(0, 8).forEach(s => slackMsg += `> 📈 ${s.name} - 爆量 *${s.multiple.toFixed(1)}* 倍\n`) 
-        : slackMsg += `> 暫無顯著標的\n`;
+      slackMsg += `\n*3) ${DAILY_MODE_META.consecutive_volume.title}*\n`;
+      slackMsg += `${formatTopCandidates(modeBuckets.consecutive_volume, "暫無連續爆量候選")}\n`;
+      slackMsg += `> AI 觀察：${consecutiveInsight}\n`;
+      slackMsg += `> 策略特性：${DAILY_MODE_META.consecutive_volume.trendHint}\n`;
 
-      slackMsg += `\n*🧱 量增價平 (主力蓄勢股)*\n`;
-      volumeUpPriceFlatStocks.length > 0 
-        ? volumeUpPriceFlatStocks.sort((a, b) => b.multiple - a.multiple).slice(0, 8).forEach(s => slackMsg += `> 🧱 ${s.name} - 量增 *${s.multiple.toFixed(1)}* 倍\n`) 
-        : slackMsg += `> 暫無顯著標的\n`;
+      slackMsg += `\n*4) ${DAILY_MODE_META.volume_no_break.title}*\n`;
+      slackMsg += `${formatTopCandidates(modeBuckets.volume_no_break, "暫無量增未破前高候選")}\n`;
+      slackMsg += `> AI 觀察：${volumeNoBreakInsight}\n`;
+      slackMsg += `> 策略特性：${DAILY_MODE_META.volume_no_break.trendHint}\n`;
     }
 
     if (slackMsg) {

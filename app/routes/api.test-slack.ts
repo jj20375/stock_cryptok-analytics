@@ -7,20 +7,13 @@ import { sendSlackMessage } from "../services/slackService";
  */
 export async function loader({ request, context }: LoaderFunctionArgs) {
   const url = new URL(request.url);
-  const type = url.searchParams.get("type"); // 'crypto' or null
+  const market = (url.searchParams.get("market") || url.searchParams.get("type") || "TW").toUpperCase();
 
   try {
     const env = (context.cloudflare as any)?.env || process.env;
     const slackToken = env.SLACK_API_TOKEN || process.env.SLACK_API_TOKEN;
-    
-    // 根據參數決定頻道 ID
-    let slackChannel = env.SLACK_CHANNEL_ID || process.env.SLACK_CHANNEL_ID;
-    let channelName = "預設頻道";
-
-    if (type === "crypto") {
-      slackChannel = env.SLACK_CRYPTO_CHANNEL_ID || process.env.SLACK_CRYPTO_CHANNEL_ID || slackChannel;
-      channelName = "虛擬幣專用頻道";
-    }
+    const slackChannel = env.SLACK_CHANNEL_ID || process.env.SLACK_CHANNEL_ID;
+    const channelName = "預設頻道";
 
     if (!slackToken || !slackChannel) {
       return Response.json({ 
@@ -30,7 +23,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       }, { status: 500 });
     }
 
-    const testMessage = `🛠️ *Slack ${channelName} 整合測試成功！*\n\n這是來自您的股市系統的自動測試訊息。\n測試類型：*${type === 'crypto' ? '虛擬幣訊號分流' : '一般報表'}*\n目前時間：${new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })}`;
+    const testMessage = `🛠️ *Slack ${channelName} 整合測試成功！*\n\n這是來自您的股市系統的自動測試訊息。\n測試類型：*${market}*\n目前時間：${new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })}`;
 
     const success = await sendSlackMessage(slackToken, slackChannel, testMessage);
 

@@ -2,7 +2,7 @@ import { createRequestHandler } from "react-router";
 // @ts-ignore
 // 引入由 React Router 在建置時產生的伺服器端進入點
 import * as build from "../build/server";
-import { runStrategyEngine } from "./services/strategyEngine";
+import { runStrategyEngine, runStockDailyStrategy } from "./services/strategyEngine";
 
 const requestHandler = createRequestHandler(build as any);
 
@@ -15,8 +15,29 @@ export default {
     },
     
     // 處理 Cloudflare Cron Triggers 排程任務
-    async scheduled(event: any, env: any, ctx: any) {
+    async scheduled(controller: any, env: any, ctx: any) {
+        const cron = controller?.cron;
+        console.log(`🕒 [Scheduler] 觸發 cron: ${cron}`);
+
         // 使用 ctx.waitUntil 確保非同步任務在 Worker 結束前完成
-        ctx.waitUntil(runStrategyEngine(env));
+        switch (cron) {
+            case "*/15 * * * *":
+                ctx.waitUntil(runStrategyEngine(env));
+                break;
+            case "0 6 * * *":
+                ctx.waitUntil(runStockDailyStrategy(env, "TW", "market"));
+                break;
+            case "15 6 * * *":
+                ctx.waitUntil(runStockDailyStrategy(env, "TW", "strategy"));
+                break;
+            case "30 20 * * *":
+                ctx.waitUntil(runStockDailyStrategy(env, "US", "market"));
+                break;
+            case "45 20 * * *":
+                ctx.waitUntil(runStockDailyStrategy(env, "US", "strategy"));
+                break;
+            default:
+                console.log(`ℹ️ [Scheduler] 未定義的 cron，略過: ${cron}`);
+        }
     }
 };

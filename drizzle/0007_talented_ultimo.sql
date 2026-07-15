@@ -1,0 +1,1 @@
+ALTER TABLE `paper_trades` ADD `stop_loss_price` text;

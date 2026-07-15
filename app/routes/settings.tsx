@@ -6,6 +6,24 @@ import { users } from "../db/schema";
 import { getUserId } from "../utils/auth";
 import { encryptData, decryptData } from "../utils/encryption";
 
+const sanitizePercent = (value: FormDataEntryValue | null, fallback: string, min: number, max: number) => {
+  const parsed = parseFloat(String(value || ""));
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(Math.max(parsed, min), max).toString();
+};
+
+const sanitizeNumber = (value: FormDataEntryValue | null, fallback: string, min: number, max: number) => {
+  const parsed = parseFloat(String(value || ""));
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(Math.max(parsed, min), max).toString();
+};
+
+const sanitizeInteger = (value: FormDataEntryValue | null, fallback: number, min: number, max: number) => {
+  const parsed = parseInt(String(value || ""), 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(Math.max(parsed, min), max);
+};
+
 export async function loader({ request, context }: LoaderFunctionArgs) {
   const userId = await getUserId(request);
   if (!userId) {
@@ -31,6 +49,15 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     telegramChatId,
     tradingMode: user.tradingMode,
     strategyTimeframe: user.strategyTimeframe || '15m',
+    capitalBaseUsdt: user.capitalBaseUsdt || "1000",
+    maxRiskPerTradePct: user.maxRiskPerTradePct || "0.5",
+    maxDailyLossPct: user.maxDailyLossPct || "1",
+    maxPositionSizePct: user.maxPositionSizePct || "10",
+    riskStopLossPct: user.riskStopLossPct || "5",
+    maxOpenPositions: user.maxOpenPositions || 2,
+    maxTradesPerDay: user.maxTradesPerDay || 3,
+    cryptoCrashGuardEnabled: user.cryptoCrashGuardEnabled ?? true,
+    liveTradingEnabled: user.liveTradingEnabled ?? false,
     hasBinance: !!user.binanceApiKey && !!user.binanceApiSecret,
     hasPionex: !!user.pionexApiKey && !!user.pionexApiSecret,
     binanceApiKey: user.binanceApiKey ? await decryptData(user.binanceApiKey, masterKey) : "",
@@ -61,6 +88,16 @@ export async function action({ request, context }: ActionFunctionArgs) {
   if (sTimeframe && ['5m', '15m', '1h', '4h'].includes(sTimeframe)) {
     updateData.strategyTimeframe = sTimeframe;
   }
+
+  updateData.capitalBaseUsdt = sanitizeNumber(formData.get("capitalBaseUsdt"), "1000", 10, 100000000);
+  updateData.maxRiskPerTradePct = sanitizePercent(formData.get("maxRiskPerTradePct"), "0.5", 0.1, 3);
+  updateData.maxDailyLossPct = sanitizePercent(formData.get("maxDailyLossPct"), "1", 0.1, 10);
+  updateData.maxPositionSizePct = sanitizePercent(formData.get("maxPositionSizePct"), "10", 1, 100);
+  updateData.riskStopLossPct = sanitizePercent(formData.get("riskStopLossPct"), "5", 1, 30);
+  updateData.maxOpenPositions = sanitizeInteger(formData.get("maxOpenPositions"), 2, 1, 20);
+  updateData.maxTradesPerDay = sanitizeInteger(formData.get("maxTradesPerDay"), 3, 1, 50);
+  updateData.cryptoCrashGuardEnabled = formData.get("cryptoCrashGuardEnabled") === "on";
+  updateData.liveTradingEnabled = formData.get("liveTradingEnabled") === "on";
 
   const tBotToken = formData.get("telegramBotToken") as string;
   const tChatId = formData.get("telegramChatId") as string;
@@ -191,6 +228,129 @@ export default function SettingsRoute() {
                     </label>
                   );
                 })}
+              </div>
+            </div>
+
+            {/* 本金保護設定 */}
+            <div className="bg-white p-6 rounded-xl shadow-sm border border-[#E4E3E0] transition-shadow hover:shadow-md">
+              <h2 className="text-xl font-medium text-[#141414] mb-4 flex items-center gap-2">
+                <span className="text-2xl">盾</span> 本金保護設定
+              </h2>
+              <p className="text-gray-600 text-sm mb-6 leading-relaxed">
+                這些參數會在任何虛擬幣開倉前先檢查。LIVE 模式還需要額外打開實戰授權，避免誤觸真實下單。
+              </p>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-bold text-[#141414] mb-1">本金基準 (USDT)</label>
+                  <input
+                    type="number"
+                    name="capitalBaseUsdt"
+                    defaultValue={data.capitalBaseUsdt}
+                    min="10"
+                    step="10"
+                    className="w-full px-4 py-2 bg-white border border-[#141414] rounded-sm text-[#141414] focus:ring-1 focus:ring-[#141414] focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-[#141414] mb-1">單筆最大風險 (%)</label>
+                  <input
+                    type="number"
+                    name="maxRiskPerTradePct"
+                    defaultValue={data.maxRiskPerTradePct}
+                    min="0.1"
+                    max="3"
+                    step="0.1"
+                    className="w-full px-4 py-2 bg-white border border-[#141414] rounded-sm text-[#141414] focus:ring-1 focus:ring-[#141414] focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-[#141414] mb-1">每日最大虧損 (%)</label>
+                  <input
+                    type="number"
+                    name="maxDailyLossPct"
+                    defaultValue={data.maxDailyLossPct}
+                    min="0.1"
+                    max="10"
+                    step="0.1"
+                    className="w-full px-4 py-2 bg-white border border-[#141414] rounded-sm text-[#141414] focus:ring-1 focus:ring-[#141414] focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-[#141414] mb-1">單筆最大倉位 (%)</label>
+                  <input
+                    type="number"
+                    name="maxPositionSizePct"
+                    defaultValue={data.maxPositionSizePct}
+                    min="1"
+                    max="100"
+                    step="1"
+                    className="w-full px-4 py-2 bg-white border border-[#141414] rounded-sm text-[#141414] focus:ring-1 focus:ring-[#141414] focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-[#141414] mb-1">預設停損距離 (%)</label>
+                  <input
+                    type="number"
+                    name="riskStopLossPct"
+                    defaultValue={data.riskStopLossPct}
+                    min="1"
+                    max="30"
+                    step="0.5"
+                    className="w-full px-4 py-2 bg-white border border-[#141414] rounded-sm text-[#141414] focus:ring-1 focus:ring-[#141414] focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-[#141414] mb-1">最大同時持倉數</label>
+                  <input
+                    type="number"
+                    name="maxOpenPositions"
+                    defaultValue={data.maxOpenPositions}
+                    min="1"
+                    max="20"
+                    step="1"
+                    className="w-full px-4 py-2 bg-white border border-[#141414] rounded-sm text-[#141414] focus:ring-1 focus:ring-[#141414] focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-[#141414] mb-1">每日最大交易次數</label>
+                  <input
+                    type="number"
+                    name="maxTradesPerDay"
+                    defaultValue={data.maxTradesPerDay}
+                    min="1"
+                    max="50"
+                    step="1"
+                    className="w-full px-4 py-2 bg-white border border-[#141414] rounded-sm text-[#141414] focus:ring-1 focus:ring-[#141414] focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <label className="flex items-start gap-3 p-4 border border-[#141414] rounded-sm bg-[#E4E3E0] cursor-pointer">
+                  <input
+                    type="checkbox"
+                    name="cryptoCrashGuardEnabled"
+                    defaultChecked={data.cryptoCrashGuardEnabled}
+                    className="mt-1 h-4 w-4 accent-[#141414]"
+                  />
+                  <span>
+                    <span className="block text-sm font-bold text-[#141414]">啟用虛擬幣崩盤保護</span>
+                    <span className="block text-xs text-gray-600 mt-1">BTC 急跌、跌破 MA200 或爆量長黑時，暫停做多。</span>
+                  </span>
+                </label>
+                <label className="flex items-start gap-3 p-4 border border-red-700 rounded-sm bg-red-50 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    name="liveTradingEnabled"
+                    defaultChecked={data.liveTradingEnabled}
+                    className="mt-1 h-4 w-4 accent-red-700"
+                  />
+                  <span>
+                    <span className="block text-sm font-bold text-red-800">允許 LIVE 真實下單</span>
+                    <span className="block text-xs text-red-700 mt-1">未勾選時，即使交易模式選 LIVE，系統也會阻擋新開倉。</span>
+                  </span>
+                </label>
               </div>
             </div>
 

@@ -284,31 +284,24 @@ export default function PortfolioPage() {
     }
   };
 
-  // 【詳細繁體中文註解】：手動重抓日報 (三階段分流發送，避免 50 次請求限制)
+  // 【詳細繁體中文註解】：手動重抓日報 (市場摘要 + AI 三模式批次分析)
   const handleRunReport = async () => {
     if (isReporting) return;
     setIsReporting(true);
     try {
       // 第一階段：市場摘要
-      const res1 = await fetch("/api/run-report?type=market");
+      const res1 = await fetch("/api/run-report?market=TW&phase=market");
       const data1 = await res1.json();
       if (!data1.success) throw new Error(`第一階段 (市場摘要) 失敗: ${data1.message}`);
 
-      // 第二階段：爆量偵測 (增加掃描深度)
+      // 第二階段：AI 三模式策略批次
       await new Promise(r => setTimeout(r, 1500)); // 緩衝
-      const res2 = await fetch("/api/run-report?type=surge");
+      const res2 = await fetch("/api/run-report?market=TW&phase=strategy");
       const data2 = await res2.json();
-      if (!data2.success) throw new Error(`第二階段 (爆量偵測) 失敗: ${data2.message}`);
-
-      // 第三階段：策略分析 (強勢股掃描)
-      await new Promise(r => setTimeout(r, 1500)); // 緩衝
-      const res3 = await fetch("/api/run-report?type=strategy");
-      const data3 = await res3.json();
-
-      if (data3.success) {
-        alert("✅ 完整三階段報表已發送！\n1. 市場摘要\n2. 爆量偵測\n3. 策略分析");
+      if (data2.success) {
+        alert("✅ 完整雙階段報表已發送！\n1. 市場摘要\n2. AI 三模式策略批次分析");
       } else {
-        throw new Error(`第三階段 (策略分析) 失敗: ${data3.message}`);
+        throw new Error(`第二階段 (AI 三模式策略批次) 失敗: ${data2.message}`);
       }
     } catch (err: any) {
       alert(`❌ 報表發送中斷: ${err.message}`);

@@ -17,7 +17,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
 
     const analysis = await evaluateCryptoStrategy(symbol, '4h');
     const slackToken = env.SLACK_API_TOKEN || process.env.SLACK_API_TOKEN;
-    const slackChannel = env.SLACK_CRYPTO_CHANNEL_ID || env.SLACK_CHANNEL_ID || process.env.SLACK_CRYPTO_CHANNEL_ID || process.env.SLACK_CHANNEL_ID;
+    const slackChannel = env.SLACK_CHANNEL_ID || process.env.SLACK_CHANNEL_ID;
 
     if (analysis.signal === 'HOLD') {
       return Response.json({ 

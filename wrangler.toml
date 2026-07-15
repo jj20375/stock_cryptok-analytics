@@ -21,4 +21,13 @@ database_id = "6bf9d8c7-359d-405a-b243-5669a98c614d"
 migrations_dir = "drizzle"
 
 [triggers]
-crons = ["*/15 * * * *"]
+# Cloudflare Cron Triggers 以 UTC 排程：
+# - 14:00 台北 = 06:00 UTC
+# - 04:30 / 04:45 台北 = 20:30 / 20:45 UTC
+crons = [
+  "*/15 * * * *",
+  "0 6 * * *",
+  "15 6 * * *",
+  "30 20 * * *",
+  "45 20 * * *"
+]
