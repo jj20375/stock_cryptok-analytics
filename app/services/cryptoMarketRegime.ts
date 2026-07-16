@@ -1,6 +1,7 @@
 import type { StockDataPoint } from "../types";
 import { calculateATR, calculateMA } from "./stockService";
 import { getKlines } from "./binanceService";
+import { getMacroIndicators } from "./macroService";
 
 export type MarketRiskLevel = "LOW" | "MEDIUM" | "HIGH" | "CRASH";
 
@@ -115,29 +116,46 @@ export const evaluateCryptoMarketRegime = async (symbol: string): Promise<Crypto
       symbolVolumeRatio,
     };
 
-    if (btcDrop1hPct <= -4 || btcDrop4hPct <= -8 || btcPanicCandle || symbolDrop1hPct <= -6 || symbolPanicCandle) {
+    // 【詳細繁體中文註解】
+    // 獲取並整合全球總經風控指標
+    const macro = await getMacroIndicators();
+    const macroState = macro?.regime?.riskState || "RISK_ON";
+    const macroReason = macro?.regime?.reason || "";
+
+    // 1. 最高風險：技術面熔斷或總經恐慌
+    if (btcDrop1hPct <= -4 || btcDrop4hPct <= -8 || btcPanicCandle || symbolDrop1hPct <= -6 || symbolPanicCandle || macroState === "PANIC") {
       return {
         allowLong: false,
         riskLevel: "CRASH",
-        reason: "偵測到瀑布或爆量長黑，暫停虛擬幣做多",
+        reason: macroState === "PANIC" 
+          ? `【總經風控熔斷】${macroReason}` 
+          : "偵測到瀑布或爆量長黑，暫停虛擬幣做多",
         metrics,
       };
     }
 
-    if (btcBelowMa200 || btcDrop1hPct <= -2.5 || btcDrop4hPct <= -5 || btcAtrPct >= 6) {
+    // 2. 高風險：BTC 技術面偏弱，或者總經環境處於嚴格收緊狀態 (RISK_OFF 且限制做多)
+    const isMacroRiskOffAborting = macroState === "RISK_OFF" && macro?.regime?.allowLong === false;
+    if (btcBelowMa200 || btcDrop1hPct <= -2.5 || btcDrop4hPct <= -5 || btcAtrPct >= 6 || isMacroRiskOffAborting) {
       return {
         allowLong: false,
         riskLevel: "HIGH",
-        reason: "BTC 風險狀態偏高，暫停開新倉保護本金",
+        reason: isMacroRiskOffAborting
+          ? `【總經收緊警示】${macroReason}`
+          : "BTC 風險狀態偏高，暫停開新倉保護本金",
         metrics,
       };
     }
 
-    if (btcAtrPct >= 4 || btcVolumeRatio >= 1.8) {
+    // 3. 中風險：BTC 技術面波動大，或總經提示應壓低倉位
+    const isMacroRiskOffSoft = macroState === "RISK_OFF" && macro?.regime?.allowLong === true;
+    if (btcAtrPct >= 4 || btcVolumeRatio >= 1.8 || isMacroRiskOffSoft) {
       return {
         allowLong: true,
         riskLevel: "MEDIUM",
-        reason: "市場波動偏高，允許交易但須壓低倉位",
+        reason: isMacroRiskOffSoft
+          ? `【總經提示】${macroReason}`
+          : "市場波動偏高，允許交易但須壓低倉位",
         metrics,
       };
     }
@@ -145,7 +163,7 @@ export const evaluateCryptoMarketRegime = async (symbol: string): Promise<Crypto
     return {
       allowLong: true,
       riskLevel: "LOW",
-      reason: "虛擬幣市場未觸發熔斷條件",
+      reason: "虛擬幣與總經環境皆穩定，未觸發風控條件",
       metrics,
     };
   } catch (error: any) {

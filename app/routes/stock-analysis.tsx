@@ -14,16 +14,46 @@ export default function StockAnalysisDashboard() {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartInstance = useRef<Chart | null>(null);
 
+  // 【詳細繁體中文註解】
+  // 前端個股分析籌碼狀態儲存與載入指示器
+  const [chipData, setChipData] = useState<any>(null);
+  const [isLoadingChips, setIsLoadingChips] = useState(false);
+
   const handleAnalyze = () => {
     if (!symbol) return;
     fetcher.submit(
-      { symbol, market: symbol.includes(".TW") || /^\d{4}$/.test(symbol) ? "TW" : "US" },
+      { symbol, market: symbol.includes(".TW") || /^\d{4,6}$/.test(symbol) ? "TW" : "US" },
       { method: "get", action: "/api/analyze-stock" }
     );
   };
 
   const isLoading = fetcher.state === "loading" || fetcher.state === "submitting";
   const data = fetcher.data as any;
+
+  // 【詳細繁體中文註解】
+  // 當個股分析結果載入後，若是台股，背景異步呼叫個股籌碼 API
+  useEffect(() => {
+    if (data && symbol && (symbol.includes(".TW") || /^\d{4,6}$/.test(symbol))) {
+      setIsLoadingChips(true);
+      fetch(`/api/chips?symbol=${encodeURIComponent(symbol)}`)
+        .then((res) => (res.ok ? res.json() : null))
+        .then((res) => {
+          if (res && res.chipData) {
+            setChipData(res.chipData);
+          } else {
+            setChipData(null);
+          }
+          setIsLoadingChips(false);
+        })
+        .catch((err) => {
+          console.error("[StockAnalysis] 獲取籌碼資料失敗:", err);
+          setChipData(null);
+          setIsLoadingChips(false);
+        });
+    } else {
+      setChipData(null);
+    }
+  }, [data]);
 
   // 初始化與更新 K 線圖表
   useEffect(() => {
@@ -282,12 +312,70 @@ export default function StockAnalysisDashboard() {
                     <p className="text-sm leading-relaxed opacity-80 group-hover:opacity-100">
                       {data.aiAnalysis.chipsAnalysis}
                     </p>
-                    <div className="border border-current/20 p-4 font-mono text-[10px] space-y-2 opacity-60 group-hover:opacity-100 flex flex-col justify-center">
-                      <p className="font-bold border-b border-current/20 pb-2 mb-2 uppercase">籌碼面判讀指南</p>
-                      <p>● 融資增加且股價未跌：視為主力吃貨「起漲訊號」。</p>
-                      <p>● 融券大增且股價強勢：具備軋空潛力。</p>
-                      <p>● 大戶持股比例：代表長期籌碼穩定度。</p>
-                    </div>
+                    
+                    {/* 【詳細繁體中文註解】：台股個股法人與信用交易籌碼可視化 */}
+                    {symbol.includes(".TW") || /^\d{4,6}$/.test(symbol) ? (
+                      <div className="border border-current/20 p-4 font-mono text-xs space-y-4">
+                        <div className="font-bold border-b border-current/20 pb-2 flex justify-between items-center">
+                          <span className="uppercase">📊 證交所籌碼日報 ({chipData?.date || "連線中..."})</span>
+                          {isLoadingChips && <span className="animate-pulse">● 更新中...</span>}
+                        </div>
+                        {chipData ? (
+                          <div className="space-y-3">
+                            <div className="grid grid-cols-3 gap-2 border-b border-current/10 pb-2">
+                              <div>
+                                <span className="text-[10px] block opacity-50">外資買賣超</span>
+                                <span className={`text-sm font-bold ${chipData.foreignBuySell >= 0 ? "text-red-500" : "text-green-500"}`}>
+                                  {chipData.foreignBuySell >= 0 ? "+" : ""}{(chipData.foreignBuySell / 1000).toLocaleString(undefined, { maximumFractionDigits: 0 })} 張
+                                </span>
+                              </div>
+                              <div>
+                                <span className="text-[10px] block opacity-50">投信買賣超</span>
+                                <span className={`text-sm font-bold ${chipData.trustBuySell >= 0 ? "text-red-500" : "text-green-500"}`}>
+                                  {chipData.trustBuySell >= 0 ? "+" : ""}{(chipData.trustBuySell / 1000).toLocaleString(undefined, { maximumFractionDigits: 0 })} 張
+                                </span>
+                              </div>
+                              <div>
+                                <span className="text-[10px] block opacity-50">自營商買賣超</span>
+                                <span className={`text-sm font-bold ${chipData.dealerBuySell >= 0 ? "text-red-500" : "text-green-500"}`}>
+                                  {chipData.dealerBuySell >= 0 ? "+" : ""}{(chipData.dealerBuySell / 1000).toLocaleString(undefined, { maximumFractionDigits: 0 })} 張
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-3 gap-2">
+                              <div>
+                                <span className="text-[10px] block opacity-50">融資餘額</span>
+                                <span className="text-sm font-bold text-blue-500">
+                                  {chipData.marginBalance.toLocaleString()} 張
+                                </span>
+                              </div>
+                              <div>
+                                <span className="text-[10px] block opacity-50">融券餘額</span>
+                                <span className="text-sm font-bold text-purple-500">
+                                  {chipData.shortBalance.toLocaleString()} 張
+                                </span>
+                              </div>
+                              <div>
+                                <span className="text-[10px] block opacity-50">券資比</span>
+                                <span className={`text-sm font-bold ${chipData.shortMarginRatio > 20 ? "text-red-500" : "text-gray-500"}`}>
+                                  {chipData.shortMarginRatio}%
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="py-4 text-center opacity-40 italic">
+                            {isLoadingChips ? "讀取證交所籌碼資料中..." : "暫無最新籌碼數據"}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="border border-current/20 p-4 font-mono text-[10px] space-y-2 opacity-60 group-hover:opacity-100 flex flex-col justify-center">
+                        <p className="font-bold border-b border-current/20 pb-2 mb-2 uppercase">美股籌碼說明</p>
+                        <p>美股無每日法人申報制度，籌碼分析主要依據 AI 整合季度 13F 機構申報及盤中大宗交易（Block Trades）進行文字判讀。</p>
+                      </div>
+                    )}
                   </div>
                 </div>
 

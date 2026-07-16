@@ -9,6 +9,8 @@ import { getAIResponse } from "./aiService";
 import { evaluateCryptoMarketRegime } from "./cryptoMarketRegime";
 import { calculateRiskBasedPosition } from "./positionSizing";
 import { evaluateCapitalRisk } from "./riskGuard";
+import { getMacroIndicators } from "./macroService";
+import { getTWStockChips } from "./chipService";
 
 // 【詳細繁體中文註解】：定義支援的幣種及其數量精確度（Decimals）
 const SYMBOL_PRECISION: Record<string, number> = {
@@ -132,12 +134,47 @@ const scanDailyModes = async (symbols: any[], market: "TW" | "US") => {
       const consecutiveVolume = evaluateConsecutiveVolumeData(data, 1.5);
       const volumeNoBreakout = evaluateVolumeNoBreakoutData(data, 1.5);
 
+      let chipAddonReason = "";
+      let chipScoreAdj = 0;
+
+      // 【詳細繁體中文註解】
+      // 若為台股市場，在技術分析觸發後進一步撈取證交所籌碼資料，進行綜合評估與評分加減
+      if (market === "TW") {
+        const chips = await getTWStockChips(stock.symbol);
+        if (chips) {
+          const fBuyK = Math.round(chips.foreignBuySell / 1000); // 換算成張數 (1張=1000股)
+          const tBuyK = Math.round(chips.trustBuySell / 1000);
+          
+          if (chips.trustBuySell > 0 && chips.foreignBuySell > 0) {
+            chipScoreAdj += 15;
+            chipAddonReason = `【土洋共識】外資+${fBuyK}張、投信+${tBuyK}張`;
+          } else if (chips.trustBuySell > 0) {
+            chipScoreAdj += 10;
+            chipAddonReason = `【投信鎖碼】投信+${tBuyK}張`;
+          } else if (chips.foreignBuySell > 0) {
+            chipScoreAdj += 5;
+            chipAddonReason = `【外資買超】外資+${fBuyK}張`;
+          }
+
+          if (chips.shortMarginRatio > 25) {
+            chipScoreAdj += 10;
+            chipAddonReason += (chipAddonReason ? " ｜ " : "") + `【軋空潛力】券資比 ${chips.shortMarginRatio}%`;
+          }
+
+          if (chips.marginBalance > 20000 && chips.shortMarginRatio < 2) {
+            // 融資餘額極高且券資比低，代表浮額重、融資摸底，扣分並警示
+            chipScoreAdj -= 10;
+            chipAddonReason += (chipAddonReason ? " ｜ " : "") + `【籌碼散亂】融資餘額 ${chips.marginBalance.toLocaleString()}張`;
+          }
+        }
+      }
+
       if (trend.isTriggered) {
         buckets.trend.push({
           symbol: stock.symbol,
           name: stock.name,
-          score: trend.score,
-          reason: trend.reasons.join("、"),
+          score: Math.min(100, Math.max(0, trend.score + chipScoreAdj)),
+          reason: trend.reasons.join("、") + (chipAddonReason ? ` (${chipAddonReason})` : ""),
           trend: trend.trend,
         });
       }
@@ -146,8 +183,8 @@ const scanDailyModes = async (symbols: any[], market: "TW" | "US") => {
         buckets.consecutive_volume.push({
           symbol: stock.symbol,
           name: stock.name,
-          score: Math.min(100, 50 + consecutiveVolume.consecutiveDays * 15),
-          reason: consecutiveVolume.reasons.join("、"),
+          score: Math.min(100, Math.max(0, 50 + consecutiveVolume.consecutiveDays * 15 + chipScoreAdj)),
+          reason: consecutiveVolume.reasons.join("、") + (chipAddonReason ? ` (${chipAddonReason})` : ""),
           trend: "up",
         });
       }
@@ -156,8 +193,8 @@ const scanDailyModes = async (symbols: any[], market: "TW" | "US") => {
         buckets.volume_no_break.push({
           symbol: stock.symbol,
           name: stock.name,
-          score: 75,
-          reason: volumeNoBreakout.reasons.join("、"),
+          score: Math.min(100, Math.max(0, 75 + chipScoreAdj)),
+          reason: volumeNoBreakout.reasons.join("、") + (chipAddonReason ? ` (${chipAddonReason})` : ""),
           trend: "down",
         });
       }
@@ -492,6 +529,22 @@ export const runStockDailyStrategy = async (env: any, market: "TW" | "US" = "TW"
     const topGainers = [...symbols].sort((a, b) => b.changePercent - a.changePercent).slice(0, 5);
     const mostActive = [...symbols].sort((a, b) => b.volume - a.volume).slice(0, 5);
     let slackMsg = `*📅 ${marketLabel}${type === "market" ? "市場日報" : "AI 三模式策略日報"} (${dateStr})*\n`;
+
+    // 【詳細繁體中文註解】：引入全域總經債券參考風向球
+    try {
+      const macro = await getMacroIndicators();
+      if (macro) {
+        slackMsg += `\n*🌍 全球總經債券風向球 (${macro.regime.riskState})*\n`;
+        slackMsg += `> 美債 10Y 殖利率: *${macro.us10y.value.toFixed(3)}%* (10日均線: ${macro.us10y.ma10.toFixed(3)}% 趨勢: ${macro.us10y.trend})\n`;
+        slackMsg += `> 美元指數 (DXY): *${macro.dxy.value.toFixed(3)}* (10日均線: ${macro.dxy.ma10.toFixed(3)} 趨勢: ${macro.dxy.trend})\n`;
+        slackMsg += `> VIX 恐慌指數: *${macro.vix.value.toFixed(2)}* (10日均線: ${macro.vix.ma10.toFixed(2)} 趨勢: ${macro.vix.trend})\n`;
+        slackMsg += `> 美債 10Y-3M 利差: *${macro.spreads.yieldSpread10Y3M.toFixed(3)}%* ${macro.spreads.yieldSpread10Y3M < 0 ? "⚠️ [殖利率倒掛]" : ""}\n`;
+        slackMsg += `> 宏觀風控狀態: _${macro.regime.reason}_\n`;
+        slackMsg += `-------------------------------------------\n`;
+      }
+    } catch (err) {
+      console.error("[StrategyEngine] 整合總經日報失敗:", err);
+    }
 
     if (type === "market") {
       slackMsg += `\n*1) 盤面概覽*\n`;

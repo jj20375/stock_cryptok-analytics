@@ -5,14 +5,17 @@ import { eq, desc } from "drizzle-orm";
 import { users, paperTrades } from "../db/schema";
 import { getUserId } from "../utils/auth";
 import { AppLayout } from "../components/AppLayout";
+import { getMacroIndicators } from "../services/macroService";
 
 export async function loader({ request, context }: LoaderFunctionArgs) {
-  const userId = await getUserId(request);
+  const env = context.cloudflare.env as any;
+  
+  // 【安全性檢查與 Lint 修復】：傳入 env 進行 Token/密鑰加解密與使用者驗證
+  const userId = await getUserId(request, env);
   if (!userId) {
     return redirect("/login");
   }
 
-  const env = context.cloudflare.env as any;
   const db = drizzle(env.DB);
 
   // 取得使用者所有的交易紀錄，依時間新到舊排序
@@ -48,11 +51,14 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   const paperStats = calculateStats("PAPER");
   const liveStats = calculateStats("LIVE");
 
-  return { trades, paperStats, liveStats };
+  // 【詳細繁體中文註解】：前端頁面同步拉取最新全球總體經濟風向球資料
+  const macro = await getMacroIndicators();
+
+  return { trades, paperStats, liveStats, macro };
 }
 
 export default function DashboardRoute() {
-  const { trades, paperStats, liveStats } = useLoaderData<typeof loader>();
+  const { trades, paperStats, liveStats, macro } = useLoaderData<typeof loader>();
 
   return (
     <AppLayout>
@@ -62,6 +68,93 @@ export default function DashboardRoute() {
             <h1 className="text-2xl md:text-3xl font-serif italic tracking-tight text-[#141414]">交易績效 Dashboard</h1>
             <p className="text-gray-600 mt-2">即時追蹤您的自動化交易成效與歷史紀錄。</p>
           </header>
+
+          {/* 【詳細繁體中文註解】：全球總經債券參考風向球 UI 元件 */}
+          {macro && (
+            <div className="bg-white border border-[#E4E3E0] rounded-xl p-6 shadow-sm">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-gray-100 pb-4 mb-6">
+                <div>
+                  <h2 className="text-lg font-medium text-gray-900 flex items-center gap-2">
+                    <span>🌍</span> 全球總經與債券風向球
+                  </h2>
+                  <p className="text-sm text-gray-500 mt-0.5">即時監控全球流動性關鍵變數，輔助交易策略風控。</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-gray-500 font-medium">全域風險狀態：</span>
+                  <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold ${
+                    macro.regime.riskState === "RISK_ON" 
+                      ? "bg-green-100 text-green-800" 
+                      : macro.regime.riskState === "RISK_OFF"
+                      ? "bg-amber-100 text-amber-800"
+                      : "bg-red-100 text-red-800"
+                  }`}>
+                    {macro.regime.riskState === "RISK_ON" ? "● RISK_ON (中性偏多)" : macro.regime.riskState === "RISK_OFF" ? "● RISK_OFF (防禦保守)" : "● PANIC (市場恐慌)"}
+                  </span>
+                </div>
+              </div>
+
+              {/* 核心指標網格 */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
+                {/* 10年期美債 */}
+                <div className="border-r border-gray-100 last:border-r-0 pr-4">
+                  <div className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-1">美債 10Y 殖利率</div>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-2xl font-bold text-gray-900">{macro.us10y.value.toFixed(3)}%</span>
+                    <span className={`text-xs font-semibold ${macro.us10y.trend === "UP" ? "text-red-500" : "text-green-500"}`}>
+                      {macro.us10y.trend === "UP" ? "▲ 上升" : "▼ 下降"}
+                    </span>
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">10MA: {macro.us10y.ma10.toFixed(3)}%</div>
+                </div>
+
+                {/* 美元指數 */}
+                <div className="border-r border-gray-100 last:border-r-0 pr-4">
+                  <div className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-1">美元指數 (DXY)</div>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-2xl font-bold text-gray-900">{macro.dxy.value.toFixed(3)}</span>
+                    <span className={`text-xs font-semibold ${macro.dxy.trend === "UP" ? "text-red-500" : "text-green-500"}`}>
+                      {macro.dxy.trend === "UP" ? "▲ 強勢" : "▼ 轉弱"}
+                    </span>
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">10MA: {macro.dxy.ma10.toFixed(3)}</div>
+                </div>
+
+                {/* VIX 恐慌指數 */}
+                <div className="border-r border-gray-100 last:border-r-0 pr-4">
+                  <div className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-1">VIX 恐慌指數</div>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-2xl font-bold text-gray-900">{macro.vix.value.toFixed(2)}</span>
+                    <span className={`text-xs font-semibold ${macro.vix.value > 20 ? "text-red-500" : "text-green-500"}`}>
+                      {macro.vix.value > 20 ? "⚠️ 偏高" : "✓ 穩定"}
+                    </span>
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">10MA: {macro.vix.ma10.toFixed(2)}</div>
+                </div>
+
+                {/* 殖利率利差 */}
+                <div>
+                  <div className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-1">美債 10Y - 3M 利差</div>
+                  <div className="flex items-baseline gap-2">
+                    <span className={`text-2xl font-bold ${macro.spreads.yieldSpread10Y3M < 0 ? "text-red-600 font-extrabold" : "text-gray-900"}`}>
+                      {macro.spreads.yieldSpread10Y3M.toFixed(3)}%
+                    </span>
+                    {macro.spreads.yieldSpread10Y3M < 0 && (
+                      <span className="text-xs font-semibold text-red-500 animate-pulse">⚠️ 倒掛</span>
+                    )}
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">
+                    5Y 殖利率: {macro.us5y.value.toFixed(3)}%
+                  </div>
+                </div>
+              </div>
+
+              {/* 風控說明文字 */}
+              <div className="mt-6 bg-gray-50 border border-gray-100 rounded-lg p-3 text-xs text-gray-600 flex items-start gap-2">
+                <span className="text-sm">💡</span>
+                <p className="leading-relaxed"><strong className="font-semibold text-gray-800">策略導航評估：</strong>{macro.regime.reason}</p>
+              </div>
+            </div>
+          )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* 模擬交易統計 */}
