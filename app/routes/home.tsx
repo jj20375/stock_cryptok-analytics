@@ -299,11 +299,18 @@ export default function App() {
         })
       });
 
+      // 【詳細繁體中文註解】：驗證後端 API 響應是否成功，避免 500 錯誤時錯誤將 Error Payload 塞入 Strategy 狀態
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `伺服器回應錯誤 (狀態碼: ${response.status})`);
+      }
+
       const result = await response.json();
       setAiStrategy(result);
-    } catch (err) {
+    } catch (err: any) {
       console.error("Failed to generate strategy:", err);
-      alert("AI 分析失敗，請稍後再試。");
+      // 【詳細繁體中文註解】：當 API 密鑰失效 (403) 時，正確彈出警告提示，而不是誤導用戶為格式異常
+      alert(`AI 分析失敗: ${err.message}`);
     } finally {
       setIsGeneratingStrategy(false);
     }
