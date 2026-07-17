@@ -131,6 +131,35 @@ export default function PortfolioPage() {
   const [isReporting, setIsReporting] = useState(false);
   const [activeMarket, setActiveMarket] = useState<'ALL' | 'TW' | 'US' | 'CRYPTO'>('ALL');
   
+  // 【詳細繁體中文註解】：儲存資產診斷與 AI 換股建議的狀態
+  const [diagnosisData, setDiagnosisData] = useState<any>(null);
+  const [isLoadingDiagnose, setIsLoadingDiagnose] = useState(false);
+
+  // 【詳細繁體中文註解】
+  // 當持倉資料載入或變更時，背景異步向診斷 API 發送請求，取得夏普率、關聯度矩陣與 AI 汰弱留強建議
+  useEffect(() => {
+    if (portfolio && portfolio.length > 0) {
+      setIsLoadingDiagnose(true);
+      fetch("/api/portfolio-diagnose")
+        .then((res) => (res.ok ? res.json() : null))
+        .then((res) => {
+          if (res && !res.empty) {
+            setDiagnosisData(res);
+          } else {
+            setDiagnosisData(null);
+          }
+          setIsLoadingDiagnose(false);
+        })
+        .catch((err) => {
+          console.error("[PortfolioDiagnose] 載入診斷失敗:", err);
+          setDiagnosisData(null);
+          setIsLoadingDiagnose(false);
+        });
+    } else {
+      setDiagnosisData(null);
+    }
+  }, [portfolio]);
+
   // 管理員 Email
   const ADMIN_EMAIL = "desiginerice5908@gmail.com";
   const isAdmin = userEmail === ADMIN_EMAIL;
@@ -441,6 +470,207 @@ export default function PortfolioPage() {
              </div>
           </div>
         </div>
+
+        {/* 【詳細繁體中文註解】：AI 資產診斷與汰弱留強建議區塊 */}
+        {portfolio.length > 0 && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
+            
+            {/* AI 汰弱留強換股建議 (佔 2 欄) */}
+            <div className="lg:col-span-2 border border-[#141414] bg-white p-8 relative overflow-hidden">
+              <div className="flex justify-between items-center border-b border-[#141414]/10 pb-4 mb-6">
+                <div>
+                  <h3 className="font-serif italic text-lg flex items-center gap-2">
+                    <span>🤖</span> AI 汰弱留強換股助手
+                  </h3>
+                  <p className="text-xs text-gray-500 mt-0.5">基於多因子技術面、籌碼流向及機會成本的動態調倉建議。</p>
+                </div>
+                {isLoadingDiagnose && <span className="text-xs text-gray-400 animate-pulse">● 分析中...</span>}
+              </div>
+
+              {diagnosisData?.advice ? (
+                <div className="space-y-6">
+                  {/* AI 診斷短評 */}
+                  <div className="bg-[#141414]/5 rounded-lg p-5 text-sm leading-relaxed text-[#141414]">
+                    <span className="font-bold block mb-1">💡 智投顧問操作指引：</span>
+                    {diagnosisData.advice.aiAdvice}
+                  </div>
+
+                  {/* 診斷清單 */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* 建議汰弱持股 */}
+                    <div className="border border-rose-200 bg-rose-50/30 rounded-lg p-4">
+                      <span className="text-xs font-bold text-rose-800 uppercase block mb-3 font-mono">⚠️ 建議汰弱 (持倉診斷較弱)</span>
+                      {diagnosisData.advice.diagnoses.filter((d: any) => d.isWeak).length === 0 ? (
+                        <p className="text-xs text-gray-500 italic">目前持倉中無明顯破位或籌碼流出標的。</p>
+                      ) : (
+                        <div className="space-y-3">
+                          {diagnosisData.advice.diagnoses.filter((d: any) => d.isWeak).map((d: any) => (
+                            <div key={d.symbol} className="border-b border-rose-100 last:border-b-0 pb-2 last:pb-0">
+                              <div className="flex justify-between text-xs font-bold text-rose-900">
+                                <span>{d.name} ({d.symbol})</span>
+                                <span>${d.price.toFixed(1)}</span>
+                              </div>
+                              <div className="text-[10px] text-rose-700/80 mt-1 space-y-0.5">
+                                {d.reasons.map((r: string, idx: number) => (
+                                  <div key={idx}>• {r}</div>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* 建議留強候選 */}
+                    <div className="border border-emerald-200 bg-emerald-50/30 rounded-lg p-4">
+                      <span className="text-xs font-bold text-emerald-800 uppercase block mb-3 font-mono">⭐ 建議留強 (市場多頭熱門)</span>
+                      {diagnosisData.advice.strongCandidates.length === 0 ? (
+                        <p className="text-xs text-gray-500 italic">暫無合適的強勢股候選。</p>
+                      ) : (
+                        <div className="space-y-3">
+                          {diagnosisData.advice.strongCandidates.map((c: any) => (
+                            <div key={c.symbol} className="border-b border-emerald-100 last:border-b-0 pb-2 last:pb-0">
+                              <div className="flex justify-between text-xs font-bold text-emerald-900">
+                                <span>{c.name} ({c.symbol})</span>
+                              </div>
+                              <p className="text-[10px] text-emerald-700/80 mt-1 leading-relaxed">{c.reason}</p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="py-12 text-center text-xs opacity-40 italic">
+                  {isLoadingDiagnose ? "正在讀取 AI 智投換股資料..." : "尚未載入診斷結果，請添加持股或重試。"}
+                </div>
+              )}
+            </div>
+
+            {/* 資產風險健康度 (佔 1 欄) */}
+            <div className="border border-[#141414] bg-white p-8 flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between border-b border-[#141414]/10 pb-4 mb-6">
+                  <h3 className="font-serif italic text-lg flex items-center gap-2">
+                    <span>📊</span> 組合風險健康度
+                  </h3>
+                </div>
+
+                {diagnosisData?.analytics ? (
+                  <div className="space-y-6">
+                    {/* 波動率 */}
+                    <div>
+                      <div className="text-[10px] font-mono opacity-50 uppercase mb-1">組合年化波動率</div>
+                      <div className="flex items-baseline gap-2">
+                        <span className="text-3xl font-mono font-bold">{(diagnosisData.analytics.portfolioVolatility * 100).toFixed(2)}%</span>
+                        <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                          diagnosisData.analytics.portfolioVolatility < 0.2
+                            ? "bg-green-50 text-green-600"
+                            : diagnosisData.analytics.portfolioVolatility < 0.4
+                            ? "bg-amber-50 text-amber-600"
+                            : "bg-rose-50 text-rose-600"
+                        }`}>
+                          {diagnosisData.analytics.portfolioVolatility < 0.2 ? "穩健" : diagnosisData.analytics.portfolioVolatility < 0.4 ? "適中" : "高波"}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* 夏普比率 */}
+                    <div>
+                      <div className="text-[10px] font-mono opacity-50 uppercase mb-1">年化夏普比率 (Sharpe)</div>
+                      <div className="flex items-baseline gap-2">
+                        <span className="text-3xl font-mono font-bold">{diagnosisData.analytics.sharpeRatio.toFixed(2)}</span>
+                        <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                          diagnosisData.analytics.sharpeRatio > 1.5
+                            ? "bg-green-50 text-green-600"
+                            : diagnosisData.analytics.sharpeRatio > 0.5
+                            ? "bg-amber-50 text-amber-600"
+                            : "bg-rose-50 text-rose-600"
+                        }`}>
+                          {diagnosisData.analytics.sharpeRatio > 1.5 ? "卓越" : diagnosisData.analytics.sharpeRatio > 0.5 ? "尚可" : "欠佳"}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* 板塊集中度 */}
+                    <div className="pt-4 border-t border-[#141414]/10">
+                      <div className="text-[10px] font-mono opacity-50 uppercase mb-3">板塊配置前三名</div>
+                      <div className="space-y-2">
+                        {diagnosisData.analytics.sectorDistribution.slice(0, 3).map((item: any) => (
+                          <div key={item.sector} className="flex justify-between items-center text-xs font-mono">
+                            <span className="opacity-60">{item.sector}</span>
+                            <span className="font-bold">{item.percentage}%</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="py-8 text-center text-xs opacity-40 italic">
+                    {isLoadingDiagnose ? "正在計算組合風險健康度..." : "暫無健康度數據"}
+                  </div>
+                )}
+              </div>
+              <div className="mt-8 pt-4 border-t border-[#141414]/10 text-[9px] font-mono opacity-40">
+                無風險利率 (3M 美債): {(diagnosisData?.analytics?.riskFreeRate * 100 || 4.0).toFixed(2)}%
+              </div>
+            </div>
+
+            {/* Pearson 相關性熱力矩陣 (佔 3 欄) */}
+            {diagnosisData?.analytics?.correlationMatrix?.matrix?.length > 1 && (
+              <div className="lg:col-span-3 border border-[#141414] bg-white p-8">
+                <div className="border-b border-[#141414]/10 pb-4 mb-6">
+                  <h3 className="font-serif italic text-lg flex items-center gap-2">
+                    <span>🔗</span> 持倉資產 Pearson 關聯度熱力矩陣
+                  </h3>
+                  <p className="text-xs text-gray-500 mt-0.5">數值越接近 +1.0 代表走勢越同向（不利避險）；負值代表走勢反向（極佳避險）；0 代表相互獨立。</p>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-center border-collapse font-mono text-xs">
+                    <thead>
+                      <tr>
+                        <th className="border border-gray-200 bg-gray-50 p-2"></th>
+                        {diagnosisData.analytics.correlationMatrix.labels.map((label: string) => (
+                          <th key={label} className="border border-gray-200 bg-gray-50 p-2 font-bold truncate max-w-[120px]" title={label}>
+                            {label}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {diagnosisData.analytics.correlationMatrix.matrix.map((row: number[], idx1: number) => (
+                        <tr key={idx1}>
+                          <td className="border border-gray-200 bg-gray-50 p-2 font-bold max-w-[120px] truncate" title={diagnosisData.analytics.correlationMatrix.labels[idx1]}>
+                            {diagnosisData.analytics.correlationMatrix.labels[idx1]}
+                          </td>
+                          {row.map((val: number, idx2: number) => {
+                            // Pearson 相關性區塊顏色深淺匹配
+                            let bgClass = "bg-white text-gray-800";
+                            if (val > 0.7) {
+                              bgClass = "bg-rose-100 text-rose-800 font-bold";
+                            } else if (val > 0.4) {
+                              bgClass = "bg-rose-50 text-rose-700";
+                            } else if (val < -0.3) {
+                              bgClass = "bg-blue-100 text-blue-800 font-bold";
+                            } else if (val < -0.1) {
+                              bgClass = "bg-blue-50 text-blue-700";
+                            }
+                            return (
+                              <td key={idx2} className={cn("border border-gray-200 p-3", bgClass)}>
+                                {val >= 0 ? "+" : ""}{val.toFixed(2)}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Assets Management Section */}
         <section className="space-y-4">
