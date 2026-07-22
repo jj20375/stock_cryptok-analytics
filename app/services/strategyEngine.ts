@@ -2,9 +2,13 @@ import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
 import { users, paperTrades } from "../db/schema";
 import { decryptData } from "../utils/encryption";
-import { getKlines, placeTestOrder } from "./binanceService";
+import { getKlines } from "./binanceService";
+import { placeCryptoBuyOrder, placeCryptoSellOrder, getExchangeCryptoPrecision, type CryptoExchange } from "./cryptoOrderRouter";
 import { sendSlackMessage } from "./slackService";
-import { calculateRSI, calculateMA, evaluateCryptoStrategy, fetchStockData, evaluateTrendMomentumData, evaluateConsecutiveVolumeData, evaluateVolumeNoBreakoutData } from "./stockService";
+import { evaluateCryptoStrategy, fetchStockData, evaluateTrendMomentumData, evaluateConsecutiveVolumeData, evaluateVolumeNoBreakoutData } from "./stockService";
+import { getStrategy } from "./strategy/registry";
+import { IndicatorCache } from "./strategy/indicatorCache";
+import type { Candle, OpenPositionState } from "./strategy/types";
 import { getAIResponse } from "./aiService";
 import { evaluateCryptoMarketRegime } from "./cryptoMarketRegime";
 import { calculateRiskBasedPosition } from "./positionSizing";
@@ -12,7 +16,7 @@ import { evaluateCapitalRisk } from "./riskGuard";
 import { getMacroIndicators } from "./macroService";
 import { getTWStockChips } from "./chipService";
 
-// 【詳細繁體中文註解】：定義支援的幣種及其數量精確度（Decimals）
+// 【詳細繁體中文註解】：定義支援的幣種及其數量精確度（Decimals，經 Binance stepSize 實測換算）
 const SYMBOL_PRECISION: Record<string, number> = {
   'BTCUSDT': 5,
   'ETHUSDT': 4,
@@ -22,6 +26,9 @@ const SYMBOL_PRECISION: Record<string, number> = {
   'XRPUSDT': 1,
   'SUIUSDT': 1,
   'AVAXUSDT': 2,
+  'ICPUSDT': 2,
+  'ZECUSDT': 3,
+  'ASTERUSDT': 2,
 };
 
 const SYMBOLS = Object.keys(SYMBOL_PRECISION);
@@ -220,8 +227,16 @@ export const runStrategyEngine = async (env: any) => {
 
   try {
     const allUsers = await db.select().from(users).all();
-    const targetUsers = allUsers.filter(u => !!u.binanceApiKey && !!u.binanceApiSecret);
-    
+    // 【詳細繁體中文註解】：依使用者偏好的交易所篩選具備完整金鑰的使用者。
+    // BITGET 額外需要 passphrase(Bitget 簽名機制的第三把鑰匙,Binance 沒有)。
+    const targetUsers = allUsers.filter(u => {
+      const exchange = (u.preferredExchange || 'BINANCE') as CryptoExchange;
+      if (exchange === 'BITGET') {
+        return !!u.bitgetApiKey && !!u.bitgetApiSecret && !!u.bitgetPassphrase;
+      }
+      return !!u.binanceApiKey && !!u.binanceApiSecret;
+    });
+
     for (const user of targetUsers) {
       const userTimeframe = user.strategyTimeframe || '15m';
       let userTrades = await db.select()
@@ -229,30 +244,78 @@ export const runStrategyEngine = async (env: any) => {
         .where(eq(paperTrades.userId, user.id))
         .all();
 
+      // 【詳細繁體中文註解】：主策略改由 strategy registry 取得(與回測引擎共用同一份 evaluate),
+      // 確保「回測驗證的邏輯」與「實際下單的邏輯」永遠一致,不再各寫一套。
+      const strategy = getStrategy("rsi_mean_reversion");
+      if (!strategy) {
+        console.error("🔥 [Strategy Engine] registry 缺少 rsi_mean_reversion 策略,跳過本輪");
+        continue;
+      }
+
       for (const symbol of SYMBOLS) {
         try {
           const klines = await getKlines(symbol, userTimeframe as any, 100);
-          if (klines.length < 20) continue;
+          if (klines.length < strategy.warmupBars + 2) continue;
 
-          const prices = klines.map(k => k.close);
-          const currentPrice = prices[prices.length - 1];
-          const rsiList = calculateRSI(prices, 14);
-          const ma20List = calculateMA(prices, 20);
-          const currentRSI = rsiList[rsiList.length - 1];
-          const currentMA20 = ma20List[ma20List.length - 1];
+          // 轉為策略抽象層的 Candle 格式
+          const candles: Candle[] = klines.map(k => ({
+            openTime: k.openTime,
+            open: k.open,
+            high: k.high,
+            low: k.low,
+            close: k.close,
+            volume: k.volume,
+          }));
 
-          const isEntrySignal = currentRSI < 20 && currentPrice < currentMA20 * 0.90;
+          // 重要行為變更(與回測對齊):以「最後一根已收盤 K 線」評估訊號,
+          // 不再使用進行中的 K 線 — 訊號時點會比舊版晚一根,但可與回測結果精確對帳。
+          const evalIndex = candles.length - 2;
+          // 停損與即時出場仍使用「當下最新價」(進行中 K 線收盤價),保持風控即時性
+          const currentPrice = candles[candles.length - 1].close;
+          const indicators = new IndicatorCache(candles);
+
           const openTrade = userTrades.find(trade => trade.symbol === symbol && trade.status === "OPEN");
           const stopLossPrice = openTrade?.stopLossPrice ? parseFloat(openTrade.stopLossPrice) : null;
           const hitStopLoss = !!stopLossPrice && currentPrice <= stopLossPrice;
-          const isMeanReversionExit = currentPrice >= currentMA20;
-          const isExitSignal = !!openTrade && (isMeanReversionExit || hitStopLoss);
 
-          const apiKey = await decryptData(user.binanceApiKey!, masterKey);
-          const apiSecret = await decryptData(user.binanceApiSecret!, masterKey);
+          // 以目前持倉狀態組出策略上下文(有倉 → 評估出場;空手 → 評估進場)
+          const positionState: OpenPositionState | null = openTrade
+            ? {
+                side: "LONG",
+                entryPrice: parseFloat(openTrade.entryPrice),
+                quantity: parseFloat(openTrade.amount),
+                stopLossPrice,
+                entryTime: new Date(openTrade.createdAt).getTime(),
+              }
+            : null;
+
+          const action = strategy.evaluate({
+            candles,
+            index: evalIndex,
+            indicators,
+            position: positionState,
+            params: { ...strategy.defaultParams },
+          });
+
+          const isEntrySignal = !openTrade && action.type === "ENTRY" && action.side === "LONG";
+          // 出場:策略訊號出場(均線回歸)或觸及停損(停損由引擎以最新價即時判斷)
+          const isExitSignal = !!openTrade && (action.type === "EXIT" || hitStopLoss);
+
+          // 【詳細繁體中文註解】：依使用者偏好交易所解密對應金鑰組(Bitget 多一把 passphrase)
+          const exchange = (user.preferredExchange || 'BINANCE') as CryptoExchange;
+          const credentials = exchange === 'BITGET'
+            ? {
+                apiKey: await decryptData(user.bitgetApiKey!, masterKey),
+                apiSecret: await decryptData(user.bitgetApiSecret!, masterKey),
+                passphrase: await decryptData(user.bitgetPassphrase!, masterKey),
+              }
+            : {
+                apiKey: await decryptData(user.binanceApiKey!, masterKey),
+                apiSecret: await decryptData(user.binanceApiSecret!, masterKey),
+              };
 
           const isLive = user.tradingMode === "LIVE";
-          const precision = SYMBOL_PRECISION[symbol] || 2;
+          const precision = getExchangeCryptoPrecision(exchange, symbol, SYMBOL_PRECISION);
 
           // 取得 Slack 設定 (支援虛擬幣專用頻道分流)
           const slackToken = env.SLACK_API_TOKEN || process.env.SLACK_API_TOKEN;
@@ -301,14 +364,15 @@ export const runStrategyEngine = async (env: any) => {
               continue;
             }
 
-            let orderSuccess = false;
-            if (isLive) {
-              const { placeRealOrder } = await import('./binanceService');
-              orderSuccess = await placeRealOrder(symbol, "BUY", position.quantity, apiKey, apiSecret);
-            } else {
-              orderSuccess = await placeTestOrder(symbol, "BUY", position.quantity, apiKey, apiSecret);
-            }
-            
+            const orderSuccess = await placeCryptoBuyOrder(
+              exchange,
+              symbol,
+              position.quantity,
+              currentPrice,
+              isLive,
+              credentials
+            );
+
             if (orderSuccess) {
               const tradeValues = {
                 userId: user.id,
@@ -316,10 +380,11 @@ export const runStrategyEngine = async (env: any) => {
                 side: "BUY",
                 status: "OPEN",
                 mode: isLive ? "LIVE" : "PAPER",
+                exchange,
                 entryPrice: currentPrice.toString(),
                 stopLossPrice: position.stopLossPrice.toString(),
                 amount: position.quantity.toString(),
-                reason: `RSI(${userTimeframe}): ${currentRSI.toFixed(2)}, MA20: ${currentMA20.toFixed(2)}, Risk: ${riskDecision.riskLevel}, SL: ${position.stopLossPrice.toFixed(4)}`
+                reason: `[${strategy.id}/${userTimeframe}/${exchange}] ${action.type === "ENTRY" ? action.reason : ""}, Risk: ${riskDecision.riskLevel}, SL: ${position.stopLossPrice.toFixed(4)}`
               };
 
               await db.insert(paperTrades).values({
@@ -337,14 +402,14 @@ export const runStrategyEngine = async (env: any) => {
               // 改發送到 Slack
               if (slackToken && slackChannel) {
                 const msg = `*🚨 [虛擬幣] 風控後抄底觸發*\n\n` +
-                  `✅ *[${isLive ? "🔥 實戰" : "🧪 模擬"}]* 已買入\n` +
+                  `✅ *[${isLive ? "🔥 實戰" : "🧪 模擬"} · ${exchange}]* 已買入\n` +
                   `• 商品：*${symbol}*\n` +
                   `• 價格：*$${currentPrice}*\n` +
                   `• 倉位：*${position.notionalUsdt.toFixed(2)} USDT* (${position.quantity})\n` +
                   `• 預估單筆風險：*${position.riskUsdt.toFixed(2)} USDT*\n` +
                   `• 停損價：*$${position.stopLossPrice.toFixed(4)}*\n` +
                   `• 風控：${riskDecision.reason}\n` +
-                  `• 理由：${userTimeframe} RSI 超賣 (${currentRSI.toFixed(2)})`;
+                  `• 理由：${action.type === "ENTRY" ? action.reason : ""}(${userTimeframe},已收盤 K 線判定)`;
                 await sendSlackMessage(slackToken, slackChannel, msg);
               }
             }
@@ -352,15 +417,41 @@ export const runStrategyEngine = async (env: any) => {
 
           if (openTrade && isExitSignal) {
             const sellQuantity = parseFloat(openTrade.amount);
-            let orderSuccess = false;
             const tradeIsLive = openTrade.mode === "LIVE";
+            // 【詳細繁體中文註解】：平倉必須用「開倉當時記錄的交易所」,而非使用者當下的偏好設定 —
+            // 避免持倉期間切換偏好交易所後,把賣單誤送到從未真正持倉的交易所。
+            const tradeExchange = (openTrade.exchange || 'BINANCE') as CryptoExchange;
+            let tradeCredentials = credentials;
+            if (tradeExchange !== exchange) {
+              // 開倉當時用的交易所金鑰,和使用者目前偏好的交易所不同 → 需另外解密對應金鑰組
+              const hasKeys = tradeExchange === 'BITGET'
+                ? !!user.bitgetApiKey && !!user.bitgetApiSecret && !!user.bitgetPassphrase
+                : !!user.binanceApiKey && !!user.binanceApiSecret;
 
-            if (tradeIsLive) {
-              const { placeRealOrder } = await import('./binanceService');
-              orderSuccess = await placeRealOrder(symbol, "SELL", sellQuantity, apiKey, apiSecret);
-            } else {
-              orderSuccess = await placeTestOrder(symbol, "SELL", sellQuantity, apiKey, apiSecret);
+              if (!hasKeys) {
+                console.warn(`⚠️ [Strategy Engine] ${symbol} 開倉於 ${tradeExchange},但使用者已移除該交易所金鑰,無法送出平倉單`);
+                continue;
+              }
+
+              tradeCredentials = tradeExchange === 'BITGET'
+                ? {
+                    apiKey: await decryptData(user.bitgetApiKey!, masterKey),
+                    apiSecret: await decryptData(user.bitgetApiSecret!, masterKey),
+                    passphrase: await decryptData(user.bitgetPassphrase!, masterKey),
+                  }
+                : {
+                    apiKey: await decryptData(user.binanceApiKey!, masterKey),
+                    apiSecret: await decryptData(user.binanceApiSecret!, masterKey),
+                  };
             }
+
+            const orderSuccess = await placeCryptoSellOrder(
+              tradeExchange,
+              symbol,
+              sellQuantity,
+              tradeIsLive,
+              tradeCredentials
+            );
 
             if (orderSuccess) {
               const entryPrice = parseFloat(openTrade.entryPrice);

@@ -1,0 +1,1 @@
+ALTER TABLE `paper_trades` ADD `exchange` text DEFAULT 'BINANCE' NOT NULL;

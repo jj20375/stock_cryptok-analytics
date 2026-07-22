@@ -1,5 +1,7 @@
 import { type LoaderFunctionArgs } from "react-router";
 import { runStockDailyStrategy } from "../services/strategyEngine";
+import { runUsCryptoStockSignals } from "../services/usCryptoSignalService";
+import { runStockAutoTrading } from "../services/usStockAutoTrading";
 import { getUserId } from "../utils/auth";
 
 /**
@@ -28,6 +30,26 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         error: "資料庫未綁定", 
         message: "env.DB 為空" 
       }, { status: 500 });
+    }
+
+    // 手動觸發「美股代幣自動交易」檢查(?phase=stock-auto-trading),供上線前測試
+    if (type === "stock-auto-trading") {
+      await runStockAutoTrading(env);
+      return Response.json({
+        success: true,
+        message: "美股代幣自動交易檢查已執行,僅對已開啟 stockAutoTradingEnabled 的使用者生效。",
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    // 手動觸發「虛擬幣概念美股收盤訊號」掃描(?phase=us-signals),供上線前測試 Slack 推播
+    if (type === "us-signals") {
+      await runUsCryptoStockSignals(env);
+      return Response.json({
+        success: true,
+        message: "虛擬幣概念美股訊號掃描已執行,有訊號時會推播 Slack。",
+        timestamp: new Date().toISOString(),
+      });
     }
 
     const normalizedPhase = type === "strategy" || type === "surge" ? "strategy" : "market";

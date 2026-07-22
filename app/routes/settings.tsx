@@ -45,6 +45,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   const telegramChatId = user.telegramChatId ? "••••••••••••••••" : "";
   const binanceApiKey = user.binanceApiKey ? "••••••••••••••••" : "";
   const pionexApiKey = user.pionexApiKey ? "••••••••••••••••" : "";
+  const bitgetApiKey = user.bitgetApiKey ? "••••••••••••••••" : "";
 
   // 【詳細繁體中文註解】：將使用者自訂的策略時間週期與基本設定帶給前端
   return {
@@ -63,8 +64,12 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     liveTradingEnabled: user.liveTradingEnabled ?? false,
     hasBinance: !!user.binanceApiKey && !!user.binanceApiSecret,
     hasPionex: !!user.pionexApiKey && !!user.pionexApiSecret,
+    hasBitget: !!user.bitgetApiKey && !!user.bitgetApiSecret && !!user.bitgetPassphrase,
     binanceApiKey,
     pionexApiKey,
+    bitgetApiKey,
+    preferredExchange: user.preferredExchange || 'BINANCE',
+    stockAutoTradingEnabled: user.stockAutoTradingEnabled ?? false,
   };
 }
 
@@ -129,13 +134,35 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
   const pApiKey = formData.get("pionexApiKey") as string;
   const pApiSecret = formData.get("pionexApiSecret") as string;
-  
+
   if (pApiKey !== null && pApiKey !== "••••••••••••••••") {
     updateData.pionexApiKey = pApiKey ? await encryptData(pApiKey, masterKey) : null;
   }
   if (pApiSecret) {
     updateData.pionexApiSecret = await encryptData(pApiSecret, masterKey);
   }
+
+  // 【詳細繁體中文註解】：Bitget 金鑰(比 Binance/Pionex 多一組 passphrase)
+  const bgApiKey = formData.get("bitgetApiKey") as string;
+  const bgApiSecret = formData.get("bitgetApiSecret") as string;
+  const bgPassphrase = formData.get("bitgetPassphrase") as string;
+
+  if (bgApiKey !== null && bgApiKey !== "••••••••••••••••") {
+    updateData.bitgetApiKey = bgApiKey ? await encryptData(bgApiKey, masterKey) : null;
+  }
+  if (bgApiSecret) {
+    updateData.bitgetApiSecret = await encryptData(bgApiSecret, masterKey);
+  }
+  if (bgPassphrase) {
+    updateData.bitgetPassphrase = await encryptData(bgPassphrase, masterKey);
+  }
+
+  const preferredExchange = formData.get("preferredExchange") as string;
+  if (preferredExchange === "BINANCE" || preferredExchange === "BITGET") {
+    updateData.preferredExchange = preferredExchange;
+  }
+
+  updateData.stockAutoTradingEnabled = formData.get("stockAutoTradingEnabled") === "on";
 
   // 如果有資料要更新
   if (Object.keys(updateData).length > 0) {
@@ -206,6 +233,21 @@ export default function SettingsRoute() {
                   </div>
                   <div className="relative z-10 text-sm text-red-600/80">真實扣款下單，盈虧自負</div>
                 </label>
+              </div>
+
+              <div className="mt-6">
+                <label className="block text-sm font-bold text-[#141414] mb-2">加密貨幣自動交易偏好交易所</label>
+                <p className="text-xs text-gray-500 mb-3">RSI 抄底策略要用哪個交易所下單，切換後請確認下方對應的 API 金鑰已填妥。</p>
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <label className={`relative flex-1 p-3 border rounded-lg cursor-pointer transition-all duration-200 ${data.preferredExchange === 'BINANCE' ? 'border-yellow-600 bg-yellow-50 shadow-[0_0_0_1px_rgba(202,138,4,1)]' : 'border-gray-200 hover:border-gray-300 bg-white'}`}>
+                    <input type="radio" name="preferredExchange" value="BINANCE" defaultChecked={data.preferredExchange === 'BINANCE'} onChange={(e) => submit(e.currentTarget.form)} className="hidden" />
+                    <div className="font-medium text-[#141414]">Binance 幣安</div>
+                  </label>
+                  <label className={`relative flex-1 p-3 border rounded-lg cursor-pointer transition-all duration-200 ${data.preferredExchange === 'BITGET' ? 'border-sky-600 bg-sky-50 shadow-[0_0_0_1px_rgba(2,132,199,1)]' : 'border-gray-200 hover:border-gray-300 bg-white'}`}>
+                    <input type="radio" name="preferredExchange" value="BITGET" defaultChecked={data.preferredExchange === 'BITGET'} onChange={(e) => submit(e.currentTarget.form)} className="hidden" />
+                    <div className="font-medium text-[#141414]">Bitget</div>
+                  </label>
+                </div>
               </div>
             </div>
 
@@ -496,6 +538,88 @@ export default function SettingsRoute() {
                   />
                 </div>
               </div>
+            </div>
+
+            {/* Bitget API 設定區塊 */}
+            <div className="bg-[#E4E3E0] p-6 rounded-sm border border-[#141414]">
+              <h2 className="text-xl font-bold text-[#141414] mb-4 flex items-center justify-between flex-wrap gap-2">
+                <div className="flex items-center">
+                  <span className="w-2 h-6 bg-sky-500 rounded-sm mr-3"></span>
+                  Bitget API
+                </div>
+                {data.hasBitget && (
+                  <span className="px-2 py-1 text-xs bg-green-100 text-green-800 border border-green-600 rounded-sm font-bold">
+                    已綁定
+                  </span>
+                )}
+              </h2>
+              <p className="text-gray-600 text-sm mb-4 leading-relaxed">
+                Bitget 除了 API Key/Secret，額外需要建立金鑰時自訂的 Passphrase。此組金鑰同時用於「加密貨幣自動交易(選擇 Bitget 時)」與「美股代幣(rToken)自動交易」。
+              </p>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-bold text-[#141414] mb-1">API Key</label>
+                  <input
+                    type="text"
+                    name="bitgetApiKey"
+                    defaultValue={data.bitgetApiKey}
+                    className="w-full px-4 py-2 bg-white border border-[#141414] rounded-sm text-[#141414] focus:ring-1 focus:ring-[#141414] focus:outline-none placeholder-gray-400"
+                    placeholder="輸入 Bitget API Key"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-[#141414] mb-1">
+                    Secret Key
+                    {data.hasBitget && <span className="text-sky-600 ml-2 font-normal text-xs">(已隱藏。若需更改請直接輸入新值)</span>}
+                  </label>
+                  <input
+                    type="password"
+                    name="bitgetApiSecret"
+                    className="w-full px-4 py-2 bg-white border border-[#141414] rounded-sm text-[#141414] focus:ring-1 focus:ring-[#141414] focus:outline-none placeholder-gray-400"
+                    placeholder={data.hasBitget ? "••••••••••••••••••••••••" : "輸入 Bitget Secret Key"}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-[#141414] mb-1">
+                    Passphrase
+                    {data.hasBitget && <span className="text-sky-600 ml-2 font-normal text-xs">(已隱藏。若需更改請直接輸入新值)</span>}
+                  </label>
+                  <input
+                    type="password"
+                    name="bitgetPassphrase"
+                    className="w-full px-4 py-2 bg-white border border-[#141414] rounded-sm text-[#141414] focus:ring-1 focus:ring-[#141414] focus:outline-none placeholder-gray-400"
+                    placeholder={data.hasBitget ? "••••••••••••••••••••••••" : "建立 API 金鑰時自訂的 Passphrase"}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* 美股代幣自動交易設定區塊 */}
+            <div className="bg-[#E4E3E0] p-6 rounded-sm border border-[#141414]">
+              <h2 className="text-xl font-bold text-[#141414] mb-4 flex items-center">
+                <span className="w-2 h-6 bg-purple-500 rounded-sm mr-3"></span>
+                美股代幣自動交易(Bitget rToken)
+              </h2>
+              <p className="text-gray-600 text-sm mb-4 leading-relaxed">
+                虛擬幣概念美股(COIN、MSTR 等)日線策略觸發時，透過 Bitget 股票代幣(如 COIN → RCOINUSDT)自動下單，
+                同樣受上方交易模式(PAPER/LIVE)與「允許 LIVE 真實下單」開關保護。<br />
+                ⚠️ 股票代幣是 Bitget 自家撮合的合成商品，非真正股票所有權，無股東投票權；交易時段為 24/5 延長時段而非全天候，
+                手續費與買賣價差可能與一般加密貨幣不同，請先詳閱 Bitget 官方說明。
+              </p>
+              <label className="flex items-start gap-3 p-4 border border-purple-700 rounded-sm bg-purple-50 cursor-pointer">
+                <input
+                  type="checkbox"
+                  name="stockAutoTradingEnabled"
+                  defaultChecked={data.stockAutoTradingEnabled}
+                  className="mt-1 h-4 w-4 accent-purple-700"
+                />
+                <span>
+                  <span className="block text-sm font-bold text-purple-900">啟用美股代幣自動交易</span>
+                  <span className="block text-xs text-purple-700 mt-1">
+                    需同時填妥上方 Bitget 三把金鑰才會生效；未啟用時，美股訊號僅發送 Slack 通知、不會下單。
+                  </span>
+                </span>
+              </label>
             </div>
 
             {/* 儲存按鈕 */}
