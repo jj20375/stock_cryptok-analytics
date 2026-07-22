@@ -55,6 +55,12 @@ type Pages = {
   "/api/run-report": {
     params: {};
   };
+  "/api/backtest": {
+    params: {};
+  };
+  "/backtest": {
+    params: {};
+  };
   "/login": {
     params: {};
   };
@@ -72,7 +78,7 @@ type Pages = {
 type RouteFiles = {
   "root.tsx": {
     id: "root";
-    page: "/" | "/dashboard" | "/stock-analysis" | "/api/top50" | "/api/stock/*" | "/api/gemini" | "/api/logout" | "/api/test-telegram" | "/api/test-slack" | "/api/test-strategy" | "/api/test-crypto" | "/api/portfolio" | "/api/analyze-stock" | "/api/run-report" | "/login" | "/register" | "/portfolio" | "/settings";
+    page: "/" | "/dashboard" | "/stock-analysis" | "/api/top50" | "/api/stock/*" | "/api/gemini" | "/api/logout" | "/api/test-telegram" | "/api/test-slack" | "/api/test-strategy" | "/api/test-crypto" | "/api/portfolio" | "/api/analyze-stock" | "/api/run-report" | "/api/backtest" | "/backtest" | "/login" | "/register" | "/portfolio" | "/settings";
   };
   "routes/home.tsx": {
     id: "routes/home";
@@ -130,6 +136,14 @@ type RouteFiles = {
     id: "routes/api.run-report";
     page: "/api/run-report";
   };
+  "routes/api.backtest.ts": {
+    id: "routes/api.backtest";
+    page: "/api/backtest";
+  };
+  "routes/backtest.tsx": {
+    id: "routes/backtest";
+    page: "/backtest";
+  };
   "routes/login.tsx": {
     id: "routes/login";
     page: "/login";
@@ -164,6 +178,8 @@ type RouteModules = {
   "routes/api.portfolio": typeof import("./app/routes/api.portfolio.ts");
   "routes/api.analyze-stock": typeof import("./app/routes/api.analyze-stock.ts");
   "routes/api.run-report": typeof import("./app/routes/api.run-report.ts");
+  "routes/api.backtest": typeof import("./app/routes/api.backtest.ts");
+  "routes/backtest": typeof import("./app/routes/backtest.tsx");
   "routes/login": typeof import("./app/routes/login.tsx");
   "routes/register": typeof import("./app/routes/register.tsx");
   "routes/portfolio": typeof import("./app/routes/portfolio.tsx");

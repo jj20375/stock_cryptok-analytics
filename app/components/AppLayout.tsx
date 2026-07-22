@@ -1,13 +1,14 @@
 import React from 'react';
 import { Link, useLocation, useRouteLoaderData } from 'react-router';
-import { 
-  Activity, 
-  LayoutGrid, 
-  List, 
-  Bell, 
-  Settings, 
+import {
+  Activity,
+  LayoutGrid,
+  List,
+  Bell,
+  Settings,
   User,
-  TrendingUp
+  TrendingUp,
+  FlaskConical
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -52,6 +53,9 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           <Link to="/portfolio" className={navLinkClass("/portfolio")} title="我的持股 Portfolio">
             <List size={20} />
           </Link>
+          <Link to="/backtest" className={navLinkClass("/backtest")} title="策略回測 Backtest">
+            <FlaskConical size={20} />
+          </Link>
           <button className="p-2 hover:bg-[#141414] hover:text-[#E4E3E0] transition-colors rounded-sm flex justify-center">
             <Bell size={20} />
           </button>
@@ -92,6 +96,9 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         </Link>
         <Link to="/dashboard" className={navLinkClass("/dashboard")}>
           <LayoutGrid size={20} />
+        </Link>
+        <Link to="/backtest" className={navLinkClass("/backtest")}>
+          <FlaskConical size={20} />
         </Link>
         <Link to="/settings" className={navLinkClass("/settings")}>
           <Settings size={20} />

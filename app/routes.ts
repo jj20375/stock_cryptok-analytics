@@ -15,6 +15,8 @@ export default [
   route("api/portfolio", "routes/api.portfolio.ts"),
   route("api/analyze-stock", "routes/api.analyze-stock.ts"),
   route("api/run-report", "routes/api.run-report.ts"),
+  route("api/backtest", "routes/api.backtest.ts"),
+  route("backtest", "routes/backtest.tsx"),
   route("login", "routes/login.tsx"),
   route("register", "routes/register.tsx"),
   route("portfolio", "routes/portfolio.tsx"),
