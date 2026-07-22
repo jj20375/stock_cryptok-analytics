@@ -127,8 +127,14 @@ export const mergeExtraUsTickers = (
   return [...curated, ...extras];
 };
 
-/** 回測範圍快捷選項(天數) */
+/**
+ * 回測範圍快捷選項(天數)。
+ * 1W/2W 主要給加密貨幣短線週期(15m/1h/4h)使用 — 日線策略在這麼短的範圍內
+ * 交易日數過少,參考價值有限,但保留選項讓使用者自行判斷,不特別限制市場。
+ */
 export const RANGE_OPTIONS: { label: string; days: number }[] = [
+  { label: '1W', days: 7 },
+  { label: '2W', days: 14 },
   { label: '3M', days: 90 },
   { label: '6M', days: 180 },
   { label: '1Y', days: 365 },

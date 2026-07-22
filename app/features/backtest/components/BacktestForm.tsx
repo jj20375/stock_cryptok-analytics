@@ -14,13 +14,44 @@ interface BacktestFormProps {
   isBusy: boolean;
   /** Bitget 股票代幣清單(僅擴充美股標的選單用,可能為空陣列) */
   extraUsTickers?: string[];
+  /** 由網址參數帶入的初始市場/代號/策略(例如首頁 Hot Picks 一鍵跳轉回測),僅套用一次 */
+  initialMarket?: 'CRYPTO' | 'US' | 'TW' | null;
+  initialSymbol?: string | null;
+  initialStrategyId?: string | null;
   onSubmit: (values: BacktestFormValues) => void;
 }
 
-export function BacktestForm({ strategies, isBusy, extraUsTickers = [], onSubmit }: BacktestFormProps) {
-  const [market, setMarket] = useState<'CRYPTO' | 'US' | 'TW'>('CRYPTO');
-  const [symbol, setSymbol] = useState('BTCUSDT');
-  const [strategyId, setStrategyId] = useState('');
+const VALID_MARKETS = ['CRYPTO', 'US', 'TW'] as const;
+
+/** 依市場慣例正規化代號(加密貨幣自動補 USDT 結尾) */
+const normalizeSymbol = (raw: string, market: 'CRYPTO' | 'US' | 'TW'): string => {
+  const trimmed = raw.trim().toUpperCase();
+  if (!trimmed) return '';
+  return market === 'CRYPTO' && !trimmed.endsWith('USDT') ? `${trimmed}USDT` : trimmed;
+};
+
+export function BacktestForm({
+  strategies,
+  isBusy,
+  extraUsTickers = [],
+  initialMarket,
+  initialSymbol,
+  initialStrategyId,
+  onSubmit,
+}: BacktestFormProps) {
+  const validInitialMarket = VALID_MARKETS.includes(initialMarket as any)
+    ? (initialMarket as 'CRYPTO' | 'US' | 'TW')
+    : 'CRYPTO';
+
+  const [market, setMarket] = useState<'CRYPTO' | 'US' | 'TW'>(validInitialMarket);
+  const [symbol, setSymbol] = useState(() =>
+    initialSymbol ? normalizeSymbol(initialSymbol, validInitialMarket) : 'BTCUSDT'
+  );
+  // 【詳細繁體中文註解】：是否使用「自行輸入代號」模式,取代下拉選單(供清單外標的回測,
+  // 網址帶入 symbol 參數時預設開啟,避免掛載時的市場切換 effect 把代號洗回清單第一筆)
+  const [useCustomSymbol, setUseCustomSymbol] = useState(() => !!initialSymbol);
+  const [customSymbolInput, setCustomSymbolInput] = useState(() => initialSymbol ?? '');
+  const [strategyId, setStrategyId] = useState(() => initialStrategyId ?? '');
   const [interval, setInterval] = useState('4h');
   const [rangeDays, setRangeDays] = useState(180);
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -50,12 +81,32 @@ export function BacktestForm({ strategies, isBusy, extraUsTickers = [], onSubmit
       : selectedStrategy.supportedIntervals;
   }, [selectedStrategy, market]);
 
-  // 切換市場時重設標的/費率預設(美股免佣 → 0;台股約 0.1425% 手續費,未計入賣出證交稅 0.3%)
+  // 切換市場時重設費率預設(美股免佣 → 0;台股約 0.1425% 手續費,未計入賣出證交稅 0.3%)。
+  // 標的只在「清單模式」下才重設為第一筆,避免切換市場時洗掉使用者自訂輸入的代號。
   useEffect(() => {
-    const list = getSymbolsByMarket(market);
-    setSymbol(list[0]?.symbol ?? '');
+    if (!useCustomSymbol) {
+      const list = getSymbolsByMarket(market);
+      setSymbol(list[0]?.symbol ?? '');
+    }
     setFeeRatePct(market === 'US' ? 0 : market === 'TW' ? 0.1425 : 0.1);
   }, [market]);
+
+  /** 將使用者輸入的自訂代號正規化(依市場慣例),更新後同步寫入 symbol */
+  const applyCustomSymbol = (raw: string) => {
+    setCustomSymbolInput(raw);
+    setSymbol(normalizeSymbol(raw, market));
+  };
+
+  const toggleCustomSymbol = (custom: boolean) => {
+    setUseCustomSymbol(custom);
+    if (custom) {
+      // 切到自訂模式:若已有輸入過的內容就套用,否則先清空等待輸入
+      applyCustomSymbol(customSymbolInput);
+    } else {
+      const list = getSymbolsByMarket(market);
+      setSymbol(list[0]?.symbol ?? '');
+    }
+  };
 
   // 策略清單載入或切換市場後,自動選第一個可用策略
   useEffect(() => {
@@ -127,14 +178,47 @@ export function BacktestForm({ strategies, isBusy, extraUsTickers = [], onSubmit
 
       {/* 標的 */}
       <div className="flex flex-col gap-1">
-        <span className={labelClass}>標的</span>
-        <select className={selectClass} value={symbol} onChange={(e) => setSymbol(e.target.value)}>
-          {symbols.map((s) => (
-            <option key={s.symbol} value={s.symbol}>
-              {s.name} ({s.symbol})
-            </option>
-          ))}
-        </select>
+        <div className="flex items-center justify-between">
+          <span className={labelClass}>標的</span>
+          <div className="flex gap-1">
+            <button className={chipClass(!useCustomSymbol)} onClick={() => toggleCustomSymbol(false)}>
+              清單選擇
+            </button>
+            <button className={chipClass(useCustomSymbol)} onClick={() => toggleCustomSymbol(true)}>
+              自訂代號
+            </button>
+          </div>
+        </div>
+
+        {useCustomSymbol ? (
+          <>
+            <input
+              type="text"
+              className={selectClass}
+              value={customSymbolInput}
+              onChange={(e) => applyCustomSymbol(e.target.value)}
+              placeholder={
+                market === 'CRYPTO' ? '例如 LINK 或 LINKUSDT' : market === 'TW' ? '例如 2454(不含 .TW)' : '例如 PLTR'
+              }
+            />
+            <p className="text-[9px] font-mono opacity-40">
+              {market === 'CRYPTO'
+                ? '未輸入 USDT 結尾會自動補上;需為 Binance 現貨交易對'
+                : market === 'TW'
+                  ? '請輸入證交所代號,系統會自動查詢對應日線資料'
+                  : '請輸入美股代號,系統會自動查詢對應日線資料'}
+              ,若查無資料會在補資料階段顯示錯誤訊息。
+            </p>
+          </>
+        ) : (
+          <select className={selectClass} value={symbol} onChange={(e) => setSymbol(e.target.value)}>
+            {symbols.map((s) => (
+              <option key={s.symbol} value={s.symbol}>
+                {s.name} ({s.symbol})
+              </option>
+            ))}
+          </select>
+        )}
       </div>
 
       {/* 策略 */}
@@ -169,7 +253,7 @@ export function BacktestForm({ strategies, isBusy, extraUsTickers = [], onSubmit
       </div>
       <div className="flex flex-col gap-1">
         <span className={labelClass}>回測範圍</span>
-        <div className="flex gap-1">
+        <div className="flex gap-1 flex-wrap">
           {RANGE_OPTIONS.map((option) => (
             <button
               key={option.label}

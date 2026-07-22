@@ -1,11 +1,13 @@
-import { Activity, BrainCircuit, Search, TrendingDown, TrendingUp, Zap } from 'lucide-react';
+import { Activity, BrainCircuit, FlaskConical, Search, TrendingDown, TrendingUp, Zap } from 'lucide-react';
 import type { RefObject } from 'react';
 import { Link } from 'react-router';
 import { cn } from '../../../utils/cn';
-import type { ScanResult, ScanStrategy, StockOption, Timeframe } from '../types';
+import type { MarketKey, ScanResult, ScanStrategy, StockOption, Timeframe } from '../types';
 
 interface MarketHotPicksProps {
   hotPicksRef: RefObject<HTMLDivElement>;
+  /** 目前選定的市場(US/TW/CRYPTO)— 用來組出「跳轉回測」連結的 market 參數 */
+  market: MarketKey;
   selectedStock: StockOption;
   scanResults: ScanResult[];
   scanStrategy: ScanStrategy;
@@ -20,6 +22,17 @@ interface MarketHotPicksProps {
   onScanStrategyChange: (strategy: ScanStrategy) => void;
   onScanTimeframeChange: (timeframe: Timeframe) => void;
 }
+
+/**
+ * 【詳細繁體中文註解】：把首頁掃描器的策略代號對應到回測系統 registry 的 strategyId,
+ * 兩邊命名不同是歷史因素(掃描器較早存在),此處集中做一次轉換,供「跳轉回測」連結使用。
+ */
+const SCAN_STRATEGY_TO_BACKTEST_ID: Record<ScanStrategy, string> = {
+  trend: 'trend_momentum',
+  consecutive_volume: 'consecutive_volume_breakout',
+  volume_no_break: 'volume_no_breakout_fade',
+  daily_volume_spike: 'daily_volume_spike',
+};
 
 const scanStrategyLabel = (strategy: ScanStrategy) => {
   if (strategy === 'consecutive_volume') return '量能連續兩期放大';
@@ -37,6 +50,7 @@ const timeframeLabel = (timeframe: Timeframe) => {
 
 export function MarketHotPicks({
   hotPicksRef,
+  market,
   selectedStock,
   scanResults,
   scanStrategy,
@@ -223,13 +237,24 @@ export function MarketHotPicks({
         </div>
       ) : scanResults.length > 0 ? (
         <div className="grid grid-cols-1 xs:grid-cols-2 lg:grid-cols-5 gap-3 md:gap-4">
-          {scanResults.slice(0, 10).map((res, idx) => (
-            <button
+          {scanResults.slice(0, 10).map((res, idx) => {
+            const isSelected = selectedStock.symbol === res.symbol;
+            // 掃描器的 4 種策略都只支援台股/美股回測(見 registry 定義),加密貨幣市場不顯示跳轉連結
+            const backtestStrategyId = SCAN_STRATEGY_TO_BACKTEST_ID[scanStrategy];
+            const backtestHref = `/backtest?market=${market}&symbol=${encodeURIComponent(res.symbol)}&strategyId=${backtestStrategyId}`;
+
+            return (
+            <div
               key={res.symbol}
+              role="button"
+              tabIndex={0}
               onClick={() => onSelectedStockChange({ symbol: res.symbol, name: res.name })}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') onSelectedStockChange({ symbol: res.symbol, name: res.name });
+              }}
               className={cn(
-                "p-3 md:p-4 border transition-all text-left relative overflow-hidden group min-h-[140px] md:min-h-[160px] flex flex-col",
-                selectedStock.symbol === res.symbol
+                "p-3 md:p-4 border transition-all text-left relative overflow-hidden group min-h-[140px] md:min-h-[160px] flex flex-col cursor-pointer",
+                isSelected
                   ? "bg-emerald-500 border-emerald-600 text-[#141414]"
                   : "bg-white/5 border-[#E4E3E0]/10 hover:border-emerald-500/50"
               )}
@@ -237,25 +262,42 @@ export function MarketHotPicks({
               <div className="flex justify-between items-start mb-2">
                 <span className={cn(
                   "text-[10px] font-mono font-bold px-1.5 py-0.5 rounded",
-                  selectedStock.symbol === res.symbol ? "bg-[#141414]/20" : "bg-emerald-500/20 text-emerald-400"
+                  isSelected ? "bg-[#141414]/20" : "bg-emerald-500/20 text-emerald-400"
                 )}>
                   RANK #{idx + 1}
                 </span>
-                {res.trend === 'up' ? (
-                  <TrendingUp className={cn("w-4 h-4", selectedStock.symbol === res.symbol ? "text-[#141414]" : "text-emerald-400")} />
-                ) : (
-                  <TrendingDown className={cn("w-4 h-4", selectedStock.symbol === res.symbol ? "text-[#141414]" : "text-rose-400")} />
-                )}
+                <div className="flex items-center gap-1.5">
+                  {market !== 'CRYPTO' && (
+                    <Link
+                      to={backtestHref}
+                      onClick={(e) => e.stopPropagation()}
+                      title="用此策略回測此標的"
+                      className={cn(
+                        "p-1 rounded-sm border transition-colors",
+                        isSelected
+                          ? "border-[#141414]/30 hover:bg-[#141414]/10"
+                          : "border-white/10 hover:border-emerald-500/50 hover:bg-emerald-500/10"
+                      )}
+                    >
+                      <FlaskConical className={cn("w-3 h-3", isSelected ? "text-[#141414]" : "text-emerald-400")} />
+                    </Link>
+                  )}
+                  {res.trend === 'up' ? (
+                    <TrendingUp className={cn("w-4 h-4", isSelected ? "text-[#141414]" : "text-emerald-400")} />
+                  ) : (
+                    <TrendingDown className={cn("w-4 h-4", isSelected ? "text-[#141414]" : "text-rose-400")} />
+                  )}
+                </div>
               </div>
 
               <div className="font-bold text-lg truncate mb-0.5">{res.symbol}</div>
-              <div className={cn("text-[10px] truncate mb-3 opacity-60", selectedStock.symbol === res.symbol ? "text-[#141414]" : "text-[#E4E3E0]")}>
+              <div className={cn("text-[10px] truncate mb-3 opacity-60", isSelected ? "text-[#141414]" : "text-[#E4E3E0]")}>
                 {res.name}
               </div>
 
               <div className={cn(
                 "mb-3 p-2 rounded-sm text-[11px] leading-tight italic font-serif flex-grow",
-                selectedStock.symbol === res.symbol ? "bg-[#141414]/10" : "bg-indigo-500/20 text-indigo-200 border border-indigo-500/30"
+                isSelected ? "bg-[#141414]/10" : "bg-indigo-500/20 text-indigo-200 border border-indigo-500/30"
               )}>
                 {res.aiInsight ? `"${res.aiInsight}"` : "AI 正在評估最佳進場時機..."}
               </div>
@@ -267,13 +309,14 @@ export function MarketHotPicks({
                 </div>
                 <div className="h-1 w-full bg-black/10 rounded-full overflow-hidden">
                   <div
-                    className={cn("h-full transition-all duration-1000", selectedStock.symbol === res.symbol ? "bg-[#141414]" : "bg-emerald-500")}
+                    className={cn("h-full transition-all duration-1000", isSelected ? "bg-[#141414]" : "bg-emerald-500")}
                     style={{ width: `${Math.min(res.score, 100)}%` }}
                   />
                 </div>
               </div>
-            </button>
-          ))}
+            </div>
+            );
+          })}
         </div>
       ) : hasRunScan ? (
         <div className="flex flex-col items-center justify-center py-12 bg-white/5 border border-dashed border-rose-500/20 rounded-sm">

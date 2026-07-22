@@ -6,7 +6,7 @@
  */
 
 import { useState } from 'react';
-import { redirect, type LoaderFunctionArgs } from 'react-router';
+import { redirect, useSearchParams, type LoaderFunctionArgs } from 'react-router';
 import { AlertTriangle, FlaskConical, RefreshCw } from 'lucide-react';
 import { AppLayout } from '../components/AppLayout';
 import { getUserId } from '../utils/auth';
@@ -46,6 +46,14 @@ export default function BacktestPage() {
 
   const [selectedTrade, setSelectedTrade] = useState<BacktestTrade | null>(null);
 
+  // 【詳細繁體中文註解】：支援從首頁「Market Hot Picks」一鍵跳轉回測 —
+  // 網址帶 ?market=US&symbol=ONDS&strategyId=trend_momentum 時,直接預填表單(不自動送出,
+  // 讓使用者仍可先確認回測區間/參數再手動點「開始回測」)。
+  const [searchParams] = useSearchParams();
+  const initialMarket = searchParams.get('market');
+  const initialSymbol = searchParams.get('symbol');
+  const initialStrategyId = searchParams.get('strategyId');
+
   const statusLabel: Record<string, string> = {
     DONE: '完成',
     ERROR: '失敗',
@@ -74,6 +82,9 @@ export default function BacktestPage() {
               strategies={strategies}
               isBusy={isBusy}
               extraUsTickers={usStockTickers}
+              initialMarket={initialMarket as 'CRYPTO' | 'US' | 'TW' | null}
+              initialSymbol={initialSymbol}
+              initialStrategyId={initialStrategyId}
               onSubmit={runBacktestFlow}
             />
 

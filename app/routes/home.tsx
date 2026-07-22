@@ -806,6 +806,7 @@ export default function App() {
         <div className="lg:col-span-3 flex flex-col gap-4">
           <MarketHotPicks
             hotPicksRef={hotPicksRef}
+            market={market}
             selectedStock={selectedStock}
             scanResults={scanResults}
             scanStrategy={scanStrategy}
