@@ -13,6 +13,7 @@ import { getUserId } from '../utils/auth';
 import { useBacktest } from '../features/backtest/useBacktest';
 import { BacktestForm } from '../features/backtest/components/BacktestForm';
 import { BacktestReport } from '../features/backtest/components/BacktestReport';
+import { WaveGoalResult } from '../features/backtest/components/WaveGoalResult';
 import { EquityCurveChart } from '../features/backtest/components/EquityCurveChart';
 import { TradeListTable } from '../features/backtest/components/TradeListTable';
 import { BacktestKlinePanel } from '../features/backtest/components/BacktestKlinePanel';
@@ -173,6 +174,7 @@ export default function BacktestPage() {
                   </span>
                 </div>
                 <BacktestReport detail={detail} />
+                <WaveGoalResult detail={detail} />
                 {detail.equityCurve && detail.result && (
                   <EquityCurveChart
                     equityCurve={detail.equityCurve}

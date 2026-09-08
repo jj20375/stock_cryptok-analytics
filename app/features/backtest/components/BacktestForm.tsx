@@ -119,6 +119,12 @@ export function BacktestForm({
   useEffect(() => {
     if (!selectedStrategy) return;
     setStrategyParams({ ...selectedStrategy.defaultParams });
+    // 波段研究預設限制單幣曝險；選定此模式時改用下一根成交，避免樂觀成交假設。
+    if (selectedStrategy.id === 'crypto_wave') {
+      setMaxRiskPerTradePct(1);
+      setMaxPositionSizePct(25);
+      setFillMode('nextOpen');
+    }
     if (!availableIntervals.includes(interval)) {
       setInterval(availableIntervals[0] ?? '1d');
     }
@@ -154,6 +160,9 @@ export function BacktestForm({
   return (
     <div className="bg-white/80 border border-[#141414] rounded-sm p-4 flex flex-col gap-4">
       <h2 className="text-sm font-bold font-serif border-b border-[#141414]/20 pb-2">回測設定</h2>
+      {selectedStrategy?.id === 'crypto_wave' && <p className="text-xs text-amber-800">
+        翻倍僅為研究目標。預設單筆風險 1%、單幣上限 25%，可在進階設定調整；請分開驗證不同幣種及行情區間。
+      </p>}
 
       {/* 市場切換 */}
       <div className="flex flex-col gap-1">

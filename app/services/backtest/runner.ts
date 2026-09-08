@@ -17,9 +17,10 @@ import { backtests, backtestTrades } from '../../db/schema';
 import { getStrategy } from '../strategy/registry';
 import { fetchBinanceRange, intervalToMs } from '../marketData/binanceHistory';
 import { fetchStockDailyHistory, toYahooSymbol } from '../marketData/stockDailyHistory';
-import { findGaps, getKlineRange, upsertKlines, type MarketType } from '../marketData/klineStore';
+import { clearCryptoKlineSeries, findGaps, getKlineRange, upsertKlines, type MarketType } from '../marketData/klineStore';
 import { runBacktestEngine, type EngineConfig, type FillMode } from './engine';
 import { computeMetrics, downsampleEquityCurve } from './metrics';
+import { validateWaveCandles } from '../waveRadar/state';
 
 type D1Db = ReturnType<typeof drizzle>;
 
@@ -77,6 +78,7 @@ export const prepareBacktestData = async (db: D1Db, backtestId: number): Promise
   const strategy = getStrategy(row.strategyId);
   if (!strategy) throw new Error(`未註冊的策略: ${row.strategyId}`);
 
+  const wasPreparing = row.status === 'PREPARING';
   await db.update(backtests).set({ status: 'PREPARING' }).where(eq(backtests.id, backtestId));
 
   try {
@@ -98,7 +100,9 @@ export const prepareBacktestData = async (db: D1Db, backtestId: number): Promise
       return { complete: true, message: `${market === 'TW' ? '台股' : '美股'} ${row.symbol} 日線已就緒(${inRange.length} 根)` };
     }
 
-    // 加密貨幣:缺口偵測 + 分頁補抓
+    // 避免 Binance 舊快取與新來源混用：新回測首次 prepare 時清空該組資料。
+    // 分頁續跑會維持 PREPARING，因此不會重複清空尚未補完的 K 線。
+    if (!wasPreparing) await clearCryptoKlineSeries(db, row.symbol, row.interval);
     const gaps = await findGaps(db, row.symbol, row.interval, fetchStart, fetchEnd, intervalMs);
     if (gaps.length === 0) {
       return { complete: true, message: '快取資料已完整,無需補抓' };
@@ -176,6 +180,8 @@ export const runBacktest = async (db: D1Db, backtestId: number): Promise<void> =
       precision: params.precision,
     };
 
+    // 波段日線由 4h 合成，歷史缺口會破壞日線與量能判斷；過期檢查僅適用即時雷達。
+    if (strategy.id === 'crypto_wave') validateWaveCandles(candles, Date.now(), false);
     const { trades, equityCurve } = runBacktestEngine(
       candles,
       strategy,

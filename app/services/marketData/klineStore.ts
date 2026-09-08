@@ -7,7 +7,7 @@
  *   3. 區間讀取:keyset 分頁撈取,組回記憶體陣列供回測引擎使用
  *
  * D1(SQLite)限制與對策:
- *   - 單一語句 bind 參數上限 100 → 每列 9 個參數,每語句最多寫 10 列,
+ *   - 單一語句 bind 參數上限 100 → 每列 10 個參數,每語句最多寫 10 列,
  *     再用 db.batch() 將多個語句打包成一次往返,兼顧額度與效能。
  *   - 單次查詢列數不宜過大 → 讀取以 5000 列為一頁 keyset 分頁。
  *
@@ -73,6 +73,19 @@ export const upsertKlines = async (
   }
 
   return candles.length;
+};
+
+/**
+ * 確保同一個加密交易對與週期只保留單一資料來源。
+ * 切換來源時清空該組快取，避免 Binance 與 Bybit 的價格／成交量混合造成回測失真；
+ * 呼叫端必須在 findGaps 前執行，讓它重新補足整個所需範圍。
+ */
+export const clearCryptoKlineSeries = async (db: D1Db, symbol: string, interval: string): Promise<void> => {
+  await db.delete(klineCache).where(and(
+    eq(klineCache.symbol, symbol),
+    eq(klineCache.market, 'CRYPTO'),
+    eq(klineCache.interval, interval)
+  ));
 };
 
 /** 缺口(需要補抓的時間段,毫秒 UTC,兩端皆含) */

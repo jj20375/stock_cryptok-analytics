@@ -78,6 +78,13 @@
       "when": 1784707743093,
       "tag": "0010_clammy_longshot",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1788759567895,
+      "tag": "0011_wave_radar",
+      "breakpoints": true
     }
   ]
 }

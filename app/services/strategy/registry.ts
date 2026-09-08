@@ -16,6 +16,7 @@ import trendMomentum from './strategies/trendMomentum';
 import consecutiveVolumeBreakout from './strategies/consecutiveVolumeBreakout';
 import volumeNoBreakoutFade from './strategies/volumeNoBreakoutFade';
 import dailyVolumeSpike from './strategies/dailyVolumeSpike';
+import cryptoWave from './strategies/cryptoWave';
 
 /** 全部已註冊策略(id 不可重複) */
 const STRATEGY_MODULES: StrategyModule[] = [
@@ -25,6 +26,7 @@ const STRATEGY_MODULES: StrategyModule[] = [
   consecutiveVolumeBreakout,
   volumeNoBreakoutFade,
   dailyVolumeSpike,
+  cryptoWave,
 ];
 
 const STRATEGY_MAP = new Map<string, StrategyModule>(

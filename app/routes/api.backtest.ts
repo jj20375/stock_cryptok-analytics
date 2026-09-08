@@ -75,6 +75,16 @@ export async function action({ request, context }: ActionFunctionArgs) {
             if (Number.isFinite(value)) strategyParams[key] = value;
           }
         }
+        // 波段策略會以參數切片計算，必須在伺服器驗證範圍與步長，不能只依賴表單。
+        if (strategy.id === 'crypto_wave') {
+          for (const meta of strategy.paramMeta) {
+            const value = strategyParams[meta.key];
+            if (value < meta.min! || value > meta.max! ||
+                Math.abs((value - meta.min!) / meta.step! - Math.round((value - meta.min!) / meta.step!)) > 1e-6) {
+              return jsonError(`波段參數超出允許範圍或步長：${meta.label}`);
+            }
+          }
+        }
 
         const toNumber = (value: unknown, fallback: number) => {
           const n = Number(value);
@@ -97,6 +107,13 @@ export async function action({ request, context }: ActionFunctionArgs) {
           // 台股以整股為單位(不模擬零股/整張限制)
           precision: toNumber(params?.precision, market === 'CRYPTO' ? 5 : market === 'TW' ? 0 : 4),
         };
+        if (strategy.id === 'crypto_wave' && (runParams.initialCapital <= 0 ||
+            runParams.maxRiskPerTradePct <= 0 || runParams.maxRiskPerTradePct > 5 ||
+            runParams.maxPositionSizePct <= 0 || runParams.maxPositionSizePct > 100 ||
+            runParams.feeRate > 0.05 || runParams.slippageBps > 1000 ||
+            !Number.isInteger(runParams.precision) || runParams.precision > 8)) {
+          return jsonError('波段回測需正本金、單筆風險 0–5%、部位上限 0–100%，並使用有效費率與精度');
+        }
 
         const [created] = await db
           .insert(backtests)

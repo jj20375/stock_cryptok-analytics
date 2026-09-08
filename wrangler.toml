@@ -8,6 +8,8 @@ assets = { directory = "./build/client" }
 enabled = true
 
 [vars]
+# 波段雷達只產生觀察與 Slack 通知；部署前須套用 0011 migration。
+WAVE_RADAR_ENABLED = "true"
 # 機密變數已移至 .dev.vars，正式上線請透過 wrangler secret put 設定
 # GEMINI_API_KEY = ""
 # TWELVE_DATA_API_KEY = ""

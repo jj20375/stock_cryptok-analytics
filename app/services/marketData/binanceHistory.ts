@@ -5,24 +5,31 @@
  *   - getKlines 只能抓「最近 N 根」(無 startTime/endTime),供 live 引擎即時評估用
  *   - 本模組支援任意時間區間的分頁抓取(單頁上限 1000 根),供回測補歷史資料用
  *
- * 資料來源刻意「只用 Binance、不用 OKX fallback」:
- *   OKX 的成交量單位與計價方式與 Binance 不同,混用會污染量能類策略的回測資料;
- *   抓不到就讓上層把回測標記為 ERROR,寧可失敗也不要餵髒資料。
+ * 資料來源固定為 Bybit 現貨，HYPE 例外固定為 Binance.US 現貨。
+ * 原 Binance 資料端點會依 Cloudflare Worker 機房位置回傳 451，無法穩定供正式回測使用。
+ * 同一個交易對與週期由快取層鎖定單一來源；切換來源時會清除舊快取再完整重抓，
+ * 因此不會把不同交易所的價格與成交量混入一份回測資料。
  *
  * 外部 API 副作用註記:
- *   使用 data-api.binance.vision(幣安官方公開行情域名,對 Cloudflare Workers 機房 IP 較友善),
- *   失敗時 fallback 到 api.binance.com。單次 Worker 請求受 subrequest 數量上限約束,
+ *   Bybit Spot Kline API 支援 start/end、每頁最多 1000 根且回傳基礎幣成交量；
+ *   HYPE 使用 Binance.US Spot Kline API。單次 Worker 請求受 subrequest 上限約束，
  *   因此 fetchBinanceRange 以 maxPages 限制單趟抓取量,未完成時回傳游標由呼叫端續抓。
  */
 
 import type { Candle } from '../strategy/types';
 
-// 公開行情專用域名(官方提供,無需金鑰;api.binance.com 對雲端機房 IP 較常拒絕連線)
-const BINANCE_VISION_URL = 'https://data-api.binance.vision';
-const BINANCE_MAIN_URL = 'https://api.binance.com';
+const BYBIT_KLINE_URL = 'https://api.bybit.com/v5/market/kline';
+const BINANCE_US_KLINE_URL = 'https://api.binance.us/api/v3/klines';
 
 // 單頁最大根數(Binance API 上限 1000)
 const PAGE_LIMIT = 1000;
+
+/** K 線來源名稱會寫入快取，確保單一回測不混合不同交易所的行情與成交量。 */
+export type CryptoKlineSource = 'BYBIT_SPOT' | 'BINANCE_US_SPOT';
+
+/** HYPE 無法可靠取得 Bybit 現貨 K 線，固定使用 Binance.US；其他監控幣固定用 Bybit。 */
+export const getCryptoKlineSource = (symbol: string): CryptoKlineSource =>
+  symbol === 'HYPEUSDT' ? 'BINANCE_US_SPOT' : 'BYBIT_SPOT';
 
 /** K 線週期字串 → 毫秒 */
 export const intervalToMs = (interval: string): number => {
@@ -38,44 +45,46 @@ export const intervalToMs = (interval: string): number => {
   return ms;
 };
 
-/** 單頁抓取:先打 data-api.binance.vision,失敗再 fallback api.binance.com */
+/** 將本系統支援的週期轉為 Bybit Spot API 週期。 */
+const toBybitInterval = (interval: string): string => {
+  const mapping: Record<string, string> = { '15m': '15', '1h': '60', '4h': '240', '1d': 'D' };
+  const value = mapping[interval];
+  if (!value) throw new Error(`Bybit 不支援的 K 線週期: ${interval}`);
+  return value;
+};
+
+/** 單頁抓取；Bybit 回傳新到舊，統一排序後才交給回測。 */
 const fetchOnePage = async (
+  source: CryptoKlineSource,
   symbol: string,
   interval: string,
   startTime: number,
   endTime: number
 ): Promise<Candle[]> => {
-  const query = `symbol=${symbol}&interval=${interval}&startTime=${startTime}&endTime=${endTime}&limit=${PAGE_LIMIT}`;
-  const urls = [
-    `${BINANCE_VISION_URL}/api/v3/klines?${query}`,
-    `${BINANCE_MAIN_URL}/api/v3/klines?${query}`,
-  ];
-
-  let lastError: unknown = null;
-  for (const url of urls) {
-    try {
-      const response = await fetch(url);
-      if (!response.ok) {
-        lastError = new Error(`Binance 歷史行情回應異常: ${response.status} ${response.statusText}`);
-        continue;
-      }
-      const data = (await response.json()) as any[];
-      return data.map((k) => ({
-        openTime: k[0] as number,
-        open: parseFloat(k[1]),
-        high: parseFloat(k[2]),
-        low: parseFloat(k[3]),
-        close: parseFloat(k[4]),
-        volume: parseFloat(k[5]),
-      }));
-    } catch (error) {
-      lastError = error;
+  const query = source === 'BYBIT_SPOT'
+    ? new URLSearchParams({ category: 'spot', symbol, interval: toBybitInterval(interval), start: String(startTime), end: String(endTime), limit: String(PAGE_LIMIT) })
+    : new URLSearchParams({ symbol, interval, startTime: String(startTime), endTime: String(endTime), limit: String(PAGE_LIMIT) });
+  const url = `${source === 'BYBIT_SPOT' ? BYBIT_KLINE_URL : BINANCE_US_KLINE_URL}?${query}`;
+  const response = await fetch(url, { signal: AbortSignal.timeout(10000) });
+  if (!response.ok) throw new Error(`${source} 歷史行情回應異常: ${response.status} ${response.statusText}`);
+  const payload = await response.json() as any;
+  if (source === 'BYBIT_SPOT') {
+    if (payload.retCode !== 0 || !Array.isArray(payload.result?.list)) {
+      throw new Error(`BYBIT_SPOT 歷史行情回應異常: ${payload.retMsg ?? '格式不正確'}`);
     }
+    return payload.result.list.map((k: string[]) => ({
+      openTime: Number(k[0]), open: Number(k[1]), high: Number(k[2]), low: Number(k[3]), close: Number(k[4]), volume: Number(k[5]),
+    })).sort((a: Candle, b: Candle) => a.openTime - b.openTime);
   }
-  throw new Error(`[Binance History] 無法取得 ${symbol} ${interval} 歷史資料: ${(lastError as any)?.message ?? lastError}`);
+  if (!Array.isArray(payload)) throw new Error('BINANCE_US_SPOT 歷史行情格式不正確');
+  return payload.map((k: unknown[]) => ({
+    openTime: Number(k[0]), open: Number(k[1]), high: Number(k[2]), low: Number(k[3]), close: Number(k[4]), volume: Number(k[5]),
+  }));
 };
 
 export interface FetchRangeResult {
+  /** 整趟請求唯一的資料來源；快取層據此避免跨交易所混用。 */
+  source: CryptoKlineSource;
   /** 本趟抓到的已收盤 K 線(依 openTime 升冪) */
   candles: Candle[];
   /** 是否已抓完整個要求區間 */
@@ -105,13 +114,14 @@ export const fetchBinanceRange = async (
   maxPages: number = 40
 ): Promise<FetchRangeResult> => {
   const intervalMs = intervalToMs(interval);
+  const source = getCryptoKlineSource(symbol);
   const candles: Candle[] = [];
   let cursor = startTime;
 
   for (let page = 0; page < maxPages; page++) {
     if (cursor > endTime) break;
 
-    const pageData = await fetchOnePage(symbol, interval, cursor, endTime);
+    const pageData = await fetchOnePage(source, symbol, interval, cursor, endTime);
     // 空頁代表該區間已無資料(例如標的上市日之前),視為抓取完成 —
     // 若不這樣處理,呼叫端會拿到永遠補不完的游標而無限輪詢
     if (pageData.length === 0) {
@@ -137,6 +147,7 @@ export const fetchBinanceRange = async (
 
   const complete = cursor > endTime;
   return {
+    source,
     candles: closedCandles,
     complete,
     nextCursor: complete ? null : cursor,

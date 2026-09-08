@@ -1,7 +1,9 @@
+import { WAVE_SYMBOLS } from '../../services/cryptoUniverse';
+
 /**
  * 【詳細繁體中文註解】：回測標的清單常數
  *
- * 加密貨幣:沿用 live 策略引擎監控的 8 個主流幣種(精度與 strategyEngine.SYMBOL_PRECISION 一致)。
+ * 加密貨幣:與波段雷達共用觀察名單，不代表自動實單清單。
  * 虛擬幣概念美股:參考 Bitget 股票市場清單挑出的加密相關標的。
  * 一般美股/台股:提供給「多空趨勢強勢追蹤」等 4 種一般選股策略使用的常見大型標的清單。
  * 使用者可直接在此檔增減標的,不需改動其他程式碼。
@@ -15,20 +17,8 @@ export interface BacktestSymbolOption {
   precision: number;
 }
 
-/** 主流加密貨幣(與 live 引擎監控清單一致) */
-export const CRYPTO_SYMBOLS: BacktestSymbolOption[] = [
-  { symbol: 'BTCUSDT', name: 'Bitcoin', market: 'CRYPTO', precision: 5 },
-  { symbol: 'ETHUSDT', name: 'Ethereum', market: 'CRYPTO', precision: 4 },
-  { symbol: 'SOLUSDT', name: 'Solana', market: 'CRYPTO', precision: 2 },
-  { symbol: 'ADAUSDT', name: 'Cardano', market: 'CRYPTO', precision: 1 },
-  { symbol: 'DOGEUSDT', name: 'Dogecoin', market: 'CRYPTO', precision: 0 },
-  { symbol: 'XRPUSDT', name: 'XRP', market: 'CRYPTO', precision: 1 },
-  { symbol: 'SUIUSDT', name: 'Sui', market: 'CRYPTO', precision: 1 },
-  { symbol: 'AVAXUSDT', name: 'Avalanche', market: 'CRYPTO', precision: 2 },
-  { symbol: 'ICPUSDT', name: 'Internet Computer', market: 'CRYPTO', precision: 2 },
-  { symbol: 'ZECUSDT', name: 'Zcash', market: 'CRYPTO', precision: 3 },
-  { symbol: 'ASTERUSDT', name: 'Aster', market: 'CRYPTO', precision: 2 },
-];
+/** 監控與回測共用清單；precision 僅為模擬數量精度，實單需另查交易所限制。 */
+export const CRYPTO_SYMBOLS: BacktestSymbolOption[] = WAVE_SYMBOLS.map(coin => ({ ...coin, market: 'CRYPTO' }));
 
 /**
  * 虛擬幣概念美股觀察清單(日線波段)。

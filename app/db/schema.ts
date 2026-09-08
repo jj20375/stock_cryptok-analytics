@@ -1,5 +1,6 @@
 import { sqliteTable, text, integer, real, uniqueIndex, index } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
+export { waveRadar, waveNotifications, waveLease } from './waveSchema';
 
 // 【詳細繁體中文註解】：使用者資料表
 export const users = sqliteTable('users', {
@@ -121,7 +122,7 @@ export const userPortfolio = sqliteTable('user_portfolio', {
 });
 
 // 【詳細繁體中文註解】：K 線歷史快取表 — 回測資料的唯一真相來源。
-// 資料來源：加密貨幣走 Binance 公開行情 API(不用 OKX fallback,避免量價單位不同污染資料)、
+// 資料來源：加密貨幣走 Bybit 現貨公開行情 API(HYPE 走 Binance.US)、
 // 美股走 Yahoo Finance 日線(不做即時價覆寫,避免回測前視偏差)。
 // open_time 為該根 K 線「開盤時間」的毫秒 UTC timestamp;
 // (symbol, interval, open_time) 唯一,重複寫入以 INSERT OR IGNORE 略過。

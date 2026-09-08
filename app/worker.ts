@@ -6,6 +6,7 @@ import { runStrategyEngine, runStockDailyStrategy } from "./services/strategyEng
 import { runUsCryptoStockSignals } from "./services/usCryptoSignalService";
 import { runStockAutoTrading } from "./services/usStockAutoTrading";
 import { runDailyKlineRefresh } from "./services/marketData/klineRefresh";
+import { runWaveRadar } from "./services/waveRadar/scanner";
 
 const requestHandler = createRequestHandler(build as any);
 
@@ -26,6 +27,8 @@ export default {
         switch (cron) {
             case "*/15 * * * *":
                 ctx.waitUntil(runStrategyEngine(env));
+                // 波段雷達獨立保存觀察狀態與發送 Slack；不呼叫交易下單服務。
+                ctx.waitUntil(runWaveRadar(env));
                 break;
             case "0 6 * * *":
                 ctx.waitUntil(runStockDailyStrategy(env, "TW", "market"));
