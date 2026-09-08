@@ -8,7 +8,8 @@ import {
   Settings,
   User,
   TrendingUp,
-  FlaskConical
+  FlaskConical,
+  Shield
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -56,9 +57,12 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           <Link to="/backtest" className={navLinkClass("/backtest")} title="策略回測 Backtest">
             <FlaskConical size={20} />
           </Link>
-          <button className="p-2 hover:bg-[#141414] hover:text-[#E4E3E0] transition-colors rounded-sm flex justify-center">
+          <Link to="/warroom" className={navLinkClass('/warroom')} title="戰情室">
+            <Shield size={20} />
+          </Link>
+          <Link to="/wave-radar" className={navLinkClass('/wave-radar')} title="波段雷達">
             <Bell size={20} />
-          </button>
+          </Link>
         </nav>
         <div className="mt-auto flex flex-col gap-6 pb-4 w-full px-2 items-center">
           {user ? (
@@ -99,6 +103,9 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         </Link>
         <Link to="/backtest" className={navLinkClass("/backtest")}>
           <FlaskConical size={20} />
+        </Link>
+        <Link to="/wave-radar" className={navLinkClass('/wave-radar')} title="波段雷達">
+          <Bell size={20} />
         </Link>
         <Link to="/settings" className={navLinkClass("/settings")}>
           <Settings size={20} />
