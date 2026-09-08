@@ -61,6 +61,15 @@ type Pages = {
   "/backtest": {
     params: {};
   };
+  "/api/warroom": {
+    params: {};
+  };
+  "/warroom": {
+    params: {};
+  };
+  "/wave-radar": {
+    params: {};
+  };
   "/login": {
     params: {};
   };
@@ -78,7 +87,7 @@ type Pages = {
 type RouteFiles = {
   "root.tsx": {
     id: "root";
-    page: "/" | "/dashboard" | "/stock-analysis" | "/api/top50" | "/api/stock/*" | "/api/gemini" | "/api/logout" | "/api/test-telegram" | "/api/test-slack" | "/api/test-strategy" | "/api/test-crypto" | "/api/portfolio" | "/api/analyze-stock" | "/api/run-report" | "/api/backtest" | "/backtest" | "/login" | "/register" | "/portfolio" | "/settings";
+    page: "/" | "/dashboard" | "/stock-analysis" | "/api/top50" | "/api/stock/*" | "/api/gemini" | "/api/logout" | "/api/test-telegram" | "/api/test-slack" | "/api/test-strategy" | "/api/test-crypto" | "/api/portfolio" | "/api/analyze-stock" | "/api/run-report" | "/api/backtest" | "/backtest" | "/api/warroom" | "/warroom" | "/wave-radar" | "/login" | "/register" | "/portfolio" | "/settings";
   };
   "routes/home.tsx": {
     id: "routes/home";
@@ -144,6 +153,18 @@ type RouteFiles = {
     id: "routes/backtest";
     page: "/backtest";
   };
+  "routes/api.warroom.ts": {
+    id: "routes/api.warroom";
+    page: "/api/warroom";
+  };
+  "routes/warroom.tsx": {
+    id: "routes/warroom";
+    page: "/warroom";
+  };
+  "routes/wave-radar.tsx": {
+    id: "routes/wave-radar";
+    page: "/wave-radar";
+  };
   "routes/login.tsx": {
     id: "routes/login";
     page: "/login";
@@ -180,6 +201,9 @@ type RouteModules = {
   "routes/api.run-report": typeof import("./app/routes/api.run-report.ts");
   "routes/api.backtest": typeof import("./app/routes/api.backtest.ts");
   "routes/backtest": typeof import("./app/routes/backtest.tsx");
+  "routes/api.warroom": typeof import("./app/routes/api.warroom.ts");
+  "routes/warroom": typeof import("./app/routes/warroom.tsx");
+  "routes/wave-radar": typeof import("./app/routes/wave-radar.tsx");
   "routes/login": typeof import("./app/routes/login.tsx");
   "routes/register": typeof import("./app/routes/register.tsx");
   "routes/portfolio": typeof import("./app/routes/portfolio.tsx");
