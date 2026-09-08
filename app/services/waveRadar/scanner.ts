@@ -14,11 +14,28 @@ export interface WaveEnv {
   SLACK_CHANNEL_ID?: string;
 }
 const LEASE_MS = 12 * 60 * 1000;
+// 單輪掃描的時間預算：留在 cron 間隔(15 分)與租約(12 分)之內。
+// 幣種數量擴充後，最差情況(主來源逾時 + 備援逾時)可能拖很久，因此以預算主動收尾，
+// 未掃到的幣會在下一輪優先處理(依 checked_at 由舊到新輪替)，確保長期覆蓋所有幣種。
+const SCAN_BUDGET_MS = 8 * 60 * 1000;
 
-/** 每次持有租約最多處理 16 幣，外部行情逾時後逐幣隔離，避免單幣故障拖垮全表。 */
+/**
+ * 逐幣掃描，外部行情逾時後逐幣隔離，避免單幣故障拖垮全表。
+ * 掃描順序依「上次檢查時間由舊到新」輪替，確保時間預算用完時未處理的幣下輪優先。
+ */
 async function scanSymbols(db: ReturnType<typeof drizzle>, owner: string) {
-  for (const { symbol } of WAVE_SYMBOLS) {
+  const startedAt = Date.now();
+  // 一次取得所有幣的上次檢查時間，據此排序輪替(未掃過的幣視為最舊、最優先)
+  const checkedRows = await db.select({ symbol: waveRadar.symbol, checkedAt: waveRadar.checkedAt }).from(waveRadar);
+  const lastChecked = new Map(checkedRows.map(r => [r.symbol, r.checkedAt]));
+  const ordered = [...WAVE_SYMBOLS].sort(
+    (a, b) => (lastChecked.get(a.symbol) ?? 0) - (lastChecked.get(b.symbol) ?? 0)
+  );
+
+  for (const { symbol } of ordered) {
     const now = Date.now();
+    // 時間預算用盡就收尾，把剩餘幣種留給下一輪，避免超出租約後才被中斷
+    if (now - startedAt >= SCAN_BUDGET_MS) return;
     const [lease] = await db.select().from(waveLease).where(eq(waveLease.id, 'scan'));
     if (lease?.owner !== owner || lease.expiresAt <= now) return;
     // 逐幣續租，避免連續外部逾時使最後幾個幣寫入時已失去排程所有權。
@@ -30,9 +47,13 @@ async function scanSymbols(db: ReturnType<typeof drizzle>, owner: string) {
     // 已成功處理的同一根 K 線不重抓、不重算；錯誤會在下輪重試。
     if (previous && !previous.error && previous.signal.barTime === lastClosedOpen) continue;
     try {
-      const result = await fetchBinanceRange(symbol, '4h', lastClosedOpen - 359 * WAVE_INTERVAL_MS, now, 1);
+      // minLatestOpenTime:要求資料必須含最新一根已收盤 K 線,否則自動改用下一個資料來源,
+      // 避免單一交易所該幣流動性低或延遲時整檔停擺(ZEC 曾因此持續失敗)。
+      const result = await fetchBinanceRange(symbol, '4h', lastClosedOpen - 359 * WAVE_INTERVAL_MS, now, 1, {
+        minLatestOpenTime: lastClosedOpen,
+      });
       validateWaveCandles(result.candles, now);
-      const next = nextWaveSnapshot(result.candles, previous);
+      const next = nextWaveSnapshot(result.candles, previous, result.source);
       const updated = { symbol, snapshotJson: JSON.stringify(next), checkedAt: now };
       const save = db.insert(waveRadar).values(updated).onConflictDoUpdate({ target: waveRadar.symbol, set: updated });
       // 只有階段改變才產生通知；初次掃描亦可通知當前候選，但 WAIT 不洗版。

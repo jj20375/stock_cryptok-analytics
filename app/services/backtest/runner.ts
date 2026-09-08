@@ -15,7 +15,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import { eq } from 'drizzle-orm';
 import { backtests, backtestTrades } from '../../db/schema';
 import { getStrategy } from '../strategy/registry';
-import { fetchBinanceRange, intervalToMs } from '../marketData/binanceHistory';
+import { fetchBinanceRange, intervalToMs, type CryptoKlineSource } from '../marketData/binanceHistory';
 import { fetchStockDailyHistory, toYahooSymbol } from '../marketData/stockDailyHistory';
 import { clearCryptoKlineSeries, findGaps, getKlineRange, upsertKlines, type MarketType } from '../marketData/klineStore';
 import { runBacktestEngine, type EngineConfig, type FillMode } from './engine';
@@ -55,6 +55,12 @@ export interface BacktestRunParams {
   defaultStopLossPct: number;
   /** 下單數量小數位數 */
   precision: number;
+  /**
+   * 首次補資料時鎖定的加密貨幣行情來源。
+   * 分頁續抓時必須沿用同一來源,否則主來源短暫故障會讓後續頁面改抓別家交易所,
+   * 造成同一份回測資料混入不同交易所的價格與成交量。
+   */
+  klineSource?: CryptoKlineSource;
 }
 
 /** 暖機資料的往前抓取範圍:暖機根數 × 週期 × 2 倍裕度(美股遇週末假日仍足夠) */
@@ -108,6 +114,10 @@ export const prepareBacktestData = async (db: D1Db, backtestId: number): Promise
       return { complete: true, message: '快取資料已完整,無需補抓' };
     }
 
+    // 首次補資料由備援機制決定來源;續抓時鎖定同一來源,避免跨交易所資料混入同一份快取
+    const storedParams = JSON.parse(row.paramsJson) as BacktestRunParams;
+    let lockedSource: CryptoKlineSource | undefined = storedParams.klineSource;
+
     let pagesUsed = 0;
     let fetchedCount = 0;
     for (const gap of gaps) {
@@ -118,7 +128,17 @@ export const prepareBacktestData = async (db: D1Db, backtestId: number): Promise
         };
       }
       const remainingPages = MAX_PAGES_PER_INVOCATION - pagesUsed;
-      const result = await fetchBinanceRange(row.symbol, row.interval, gap.from, gap.to, remainingPages);
+      const result = await fetchBinanceRange(row.symbol, row.interval, gap.from, gap.to, remainingPages, {
+        forcedSource: lockedSource,
+      });
+      // 首次成功抓取後把來源寫回 params_json,後續輪詢沿用同一來源
+      if (!lockedSource) {
+        lockedSource = result.source;
+        await db
+          .update(backtests)
+          .set({ paramsJson: JSON.stringify({ ...storedParams, klineSource: result.source }) })
+          .where(eq(backtests.id, backtestId));
+      }
       // 估算本次用掉的頁數(至少 1 頁)
       pagesUsed += Math.max(1, Math.ceil(result.candles.length / 1000));
       if (result.candles.length > 0) {

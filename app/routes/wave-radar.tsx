@@ -4,7 +4,7 @@ import { count, isNull } from 'drizzle-orm';
 import { AppLayout } from '../components/AppLayout';
 import { getUserId } from '../utils/auth';
 import { waveNotifications, waveRadar } from '../db/waveSchema';
-import { WAVE_SYMBOLS, waveSource } from '../services/cryptoUniverse';
+import { WAVE_SYMBOLS, waveSource, waveSourceLabel } from '../services/cryptoUniverse';
 import { WAVE_INTERVAL_MS, WAVE_LABELS } from '../services/strategy/strategies/cryptoWave';
 import type { WaveSnapshot } from '../services/waveRadar/state';
 
@@ -42,19 +42,46 @@ export default function WaveRadarPage() {
         <p className="opacity-60">先驗證多幣、多個行情區間與樣本外績效。此模式不會自動下單，也不保證翻倍。</p>
       </section>
       {data.error && <p role="alert" className="bg-amber-50 p-4 border border-amber-400">{data.error}</p>}
-      <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">
-        {WAVE_SYMBOLS.map(coin => {
+      {(() => {
+        // 幣種擴充到數十檔後平鋪很難看重點：先算出每檔狀態，讓有訊號的排最前面。
+        const TIER_LABELS: Record<string, string> = { major: '主流', mid: '中型', meme: '迷因/高波動' };
+        const PHASE_RANK: Record<string, number> = { BREAKOUT: 0, RETEST: 1, WATCH: 2, EXTENDED: 3, EXIT: 4, WAIT: 5 };
+        const cards = WAVE_SYMBOLS.map(coin => {
           const row = data.rows.find(item => item.symbol === coin.symbol);
           const snapshot: WaveSnapshot | null = row ? JSON.parse(row.snapshotJson) : null;
           const signal = snapshot?.signal;
           // 舊行情即使有訊號也不能用醒目「啟動」標籤冒充當前機會。
           const stale = !signal?.barTime || data.now - signal.barTime >= 2 * WAVE_INTERVAL_MS;
-          const healthy = snapshot && !snapshot.error && !stale;
+          const healthy = !!snapshot && !snapshot.error && !stale;
           const active = healthy && (signal?.phase === 'BREAKOUT' || signal?.phase === 'RETEST');
+          return { coin, snapshot, signal, stale, healthy, active };
+        }).sort((a, b) => {
+          // 健康且有訊號者優先，其次依階段重要性，最後才是尚未就緒/異常的幣
+          if (a.healthy !== b.healthy) return a.healthy ? -1 : 1;
+          const rankA = a.healthy ? PHASE_RANK[a.signal!.phase] ?? 9 : 9;
+          const rankB = b.healthy ? PHASE_RANK[b.signal!.phase] ?? 9 : 9;
+          return rankA - rankB;
+        });
+        const actionable = cards.filter(c => c.active).length;
+        const watching = cards.filter(c => c.healthy && c.signal?.phase === 'WATCH').length;
+        const abnormal = cards.filter(c => !c.healthy).length;
+        return <>
+          <section className="flex flex-wrap gap-3 text-sm">
+            {/* 措辭刻意避開「波段啟動」四字：該字樣保留給個別幣種真正處於啟動階段時使用，
+                避免全部資料過期時，摘要文字讓人誤以為有現成的進場機會。 */}
+            <span className="px-3 py-1 rounded border border-emerald-700 bg-emerald-50">可進場訊號：{actionable}</span>
+            <span className="px-3 py-1 rounded border border-black/20 bg-white/70">候選觀察：{watching}</span>
+            <span className="px-3 py-1 rounded border border-black/20 bg-white/70">監控中：{cards.length} 檔</span>
+            {abnormal > 0 && <span className="px-3 py-1 rounded border border-amber-400 bg-amber-50">尚未就緒/異常：{abnormal}</span>}
+          </section>
+          <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">
+            {cards.map(({ coin, snapshot, signal, stale, healthy, active }) => {
           return <article key={coin.symbol} className={`border rounded p-4 space-y-3 ${active ? 'border-emerald-700 bg-emerald-50' : 'border-black/20 bg-white/70'}`}>
-            <div className="flex justify-between gap-2"><h2 className="font-bold">{coin.symbol.replace('USDT', '')} <span className="font-normal text-xs">{coin.name}</span></h2>
+            <div className="flex justify-between gap-2"><h2 className="font-bold">{coin.symbol.replace('USDT', '')} <span className="font-normal text-xs">{coin.name}</span>
+              <span className="ml-2 font-normal text-[10px] px-1.5 py-0.5 rounded bg-black/10">{TIER_LABELS[coin.tier]}</span></h2>
               <span className="text-xs">{healthy ? WAVE_LABELS[signal!.phase] : snapshot?.error ? '資料異常' : '等待更新'}</span></div>
-            <p className="text-xs opacity-60">{waveSource(coin.symbol)}</p>
+            {/* 顯示實際採用的來源(備援可能切換)，尚未取得時才顯示預期來源 */}
+            <p className="text-xs opacity-60">{snapshot?.source ? waveSourceLabel(snapshot.source) : waveSource(coin.symbol)}</p>
             <p className="text-sm min-h-10">{snapshot?.error || (stale ? '尚無最新已收盤行情，暫不判斷上漲機會。' : signal?.reason)}</p>
             {healthy && <dl className="text-sm grid grid-cols-2 gap-2">
               <dt>收盤 USDT</dt><dd>{signal!.price.toPrecision(6)}</dd>
@@ -65,8 +92,10 @@ export default function WaveRadarPage() {
             {signal?.barTime ? <p className="text-xs opacity-60">K 線收盤：{new Date(signal.barTime + WAVE_INTERVAL_MS).toISOString().replace('T', ' ').replace('.000Z', ' UTC')}</p> : null}
             <Link className="inline-block underline text-sm font-semibold" to={`/backtest?market=CRYPTO&symbol=${coin.symbol}&strategyId=crypto_wave`}>驗證這個幣的波段策略 →</Link>
           </article>;
-        })}
-      </div>
+            })}
+          </div>
+        </>;
+      })()}
     </div>
   </AppLayout>;
 }

@@ -1,13 +1,15 @@
 import cryptoWave, { analyzeWave, WAVE_INTERVAL_MS, WAVE_LABELS, type WaveSignal } from '../strategy/strategies/cryptoWave';
 import { IndicatorCache } from '../strategy/indicatorCache';
 import type { Candle, OpenPositionState } from '../strategy/types';
-import { waveSource } from '../cryptoUniverse';
+import { waveSourceLabel } from '../cryptoUniverse';
 
 export interface WaveSnapshot {
   signal: WaveSignal;
   // 純訊號追蹤部位，無資金或成交假設；報酬驗證由回測引擎扣費計算。
   tracking: { entryTime: number; stopPrice: number; referencePrice: number } | null;
   error: string | null;
+  /** 本次快照實際採用的行情來源代碼(備援機制可能切換來源,故需逐次記錄) */
+  source?: string | null;
 }
 
 /** 檢查最近 360 根連續、有效且已收盤；中斷資料不可當成正常市場訊號。 */
@@ -28,7 +30,7 @@ export function validateWaveCandles(candles: Candle[], now: number, requireFresh
 }
 
 /** 依上次訊號追蹤失效；停機缺口無法補齊時，不假裝持續追蹤成功。 */
-export function nextWaveSnapshot(candles: Candle[], previous: WaveSnapshot | null): WaveSnapshot {
+export function nextWaveSnapshot(candles: Candle[], previous: WaveSnapshot | null, source?: string): WaveSnapshot {
   const index = candles.length - 1;
   const current = candles[index];
   const indicators = new IndicatorCache(candles);
@@ -55,14 +57,14 @@ export function nextWaveSnapshot(candles: Candle[], previous: WaveSnapshot | nul
   if (!tracking && signal.phase !== 'EXIT' && (signal.phase === 'BREAKOUT' || signal.phase === 'RETEST')) {
     tracking = { entryTime: current.openTime, referencePrice: current.close, stopPrice: current.close * (1 - signal.stopLossPct! / 100) };
   }
-  return { signal, tracking, error: null };
+  return { signal, tracking, error: null, source: source ?? null };
 }
 
 export function waveMessage(symbol: string, snapshot: WaveSnapshot) {
   const s = snapshot.signal;
   const price = (value: number | null | undefined) => value == null ? '尚無' : value.toPrecision(6);
   return `*波段雷達｜${symbol}｜${WAVE_LABELS[s.phase]}*\n` +
-    `資料：${waveSource(symbol)}，4h 收盤 ${new Date(s.barTime + WAVE_INTERVAL_MS).toISOString()}\n` +
+    `資料：${waveSourceLabel(snapshot.source)}，4h 收盤 ${new Date(s.barTime + WAVE_INTERVAL_MS).toISOString()}\n` +
     `參考收盤：${price(s.price)} USDT｜突破位：${price(s.breakout)}\n` +
     `量能：${s.volumeRatio?.toFixed(2) ?? '—'} 倍前期均量\n` +
     `追蹤失效參考：${price(snapshot.tracking?.stopPrice)} USDT\n` +

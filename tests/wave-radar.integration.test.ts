@@ -21,6 +21,7 @@ test('D1 排程：逐幣隔離、HYPE 現貨來源、失敗補送、階段去重
     let sent = 0;
     let lastMessage = '';
     let hypeHost = '';
+    const lastOpenTime = () => Math.floor(Date.now() / WAVE_INTERVAL_MS) * WAVE_INTERVAL_MS - WAVE_INTERVAL_MS;
     globalThis.fetch = async (input, init) => {
       const url = new URL(String(input));
       if (url.hostname === 'slack.com') {
@@ -29,13 +30,23 @@ test('D1 排程：逐幣隔離、HYPE 現貨來源、失敗補送、階段去重
         lastMessage = JSON.parse(init?.body as string).text;
         return Response.json({ ok: true });
       }
+      // Gate.io 備援來源：欄位順序為 [秒級時間, 計價幣成交額, 收, 高, 低, 開, 基礎幣成交量, 是否已收盤]
+      if (url.pathname === '/api/v4/spot/candlesticks') {
+        marketRequests++;
+        const pair = url.searchParams.get('currency_pair');
+        // ASTER 設定為所有來源皆失敗，驗證「單幣全滅仍逐幣隔離、不影響其他幣」
+        if (pair === 'ASTER_USDT' && badAster) return new Response('unavailable', { status: 503 });
+        return Response.json(waveFixture(lastOpenTime()).map(c =>
+          [`${c.openTime / 1000}`, '0', `${c.close}`, `${c.high}`, `${c.low}`, `${c.open}`, `${c.volume}`, 'true']));
+      }
       if (url.pathname === '/api/v3/klines' || url.pathname === '/v5/market/kline') {
         marketRequests++;
         const symbol = url.searchParams.get('symbol');
         if (symbol === 'HYPEUSDT') hypeHost = url.hostname;
         if (symbol === 'ASTERUSDT' && badAster) return new Response('unavailable', { status: 503 });
-        const lastOpen = Math.floor(Date.now() / WAVE_INTERVAL_MS) * WAVE_INTERVAL_MS - WAVE_INTERVAL_MS;
-        const rows = waveFixture(lastOpen).map(c => [c.openTime, `${c.open}`, `${c.high}`, `${c.low}`, `${c.close}`, `${c.volume}`]);
+        // ZEC 主來源故障但 Gate.io 正常，驗證備援切換會成功而非讓整檔停擺
+        if (symbol === 'ZECUSDT') return new Response('unavailable', { status: 503 });
+        const rows = waveFixture(lastOpenTime()).map(c => [c.openTime, `${c.open}`, `${c.high}`, `${c.low}`, `${c.close}`, `${c.volume}`]);
         return url.hostname === 'api.bybit.com'
           ? Response.json({ retCode: 0, retMsg: 'OK', result: { list: rows.reverse() } })
           : Response.json(rows);
@@ -48,7 +59,12 @@ test('D1 排程：逐幣隔離、HYPE 現貨來源、失敗補送、階段去重
     await runWaveRadar(env);
     const rows = await binding.prepare('SELECT * FROM wave_radar').all();
     assert.equal(rows.results.length, WAVE_SYMBOLS.length);
+    // ASTER 所有來源皆故障：仍記錄錯誤且不影響其他幣種(逐幣隔離)
     assert.ok(JSON.parse(rows.results.find(r => r.symbol === 'ASTERUSDT')!.snapshot_json as string).error);
+    // ZEC 主來源故障但備援成功：不得記錄錯誤，且必須標示實際採用的來源為 Gate.io
+    const zec = JSON.parse(rows.results.find(r => r.symbol === 'ZECUSDT')!.snapshot_json as string);
+    assert.equal(zec.error, null);
+    assert.equal(zec.source, 'GATE_SPOT');
     assert.equal(hypeHost, 'api.binance.us');
     const queued = await binding.prepare('SELECT COUNT(*) AS n FROM wave_notifications WHERE sent_at IS NULL').first<{ n: number }>();
     assert.equal(queued!.n, WAVE_SYMBOLS.length - 1);
@@ -57,10 +73,16 @@ test('D1 排程：逐幣隔離、HYPE 現貨來源、失敗補送、階段去重
     badAster = false;
     const requestsBeforeRetry = marketRequests;
     await runWaveRadar(env);
+    // 只有先前失敗的 ASTER 需要重抓，其餘幣種同一根 K 線不重複請求
     assert.equal(marketRequests - requestsBeforeRetry, 1);
-    assert.equal(sent, WAVE_SYMBOLS.length);
+    // 通知每輪最多送 20 則(避免轟炸 Slack)，幣種數超過批次量時會分多輪送完
+    const DELIVERY_BATCH = 20;
+    assert.equal(sent, Math.min(DELIVERY_BATCH, WAVE_SYMBOLS.length));
     const requestsAfterRetry = marketRequests;
-    await runWaveRadar(env);
+    // 重複執行直到佇列清空，驗證分批送達最終會把所有通知送出且不重抓行情
+    for (let round = 0; round < Math.ceil(WAVE_SYMBOLS.length / DELIVERY_BATCH); round++) {
+      await runWaveRadar(env);
+    }
     assert.equal(sent, WAVE_SYMBOLS.length);
     assert.equal(marketRequests, requestsAfterRetry);
     await binding.prepare('INSERT INTO wave_lease (id, owner, expires_at) VALUES (?, ?, ?)').bind('scan', 'another-worker', Date.now() + 60000).run();
