@@ -56,7 +56,11 @@ test('D1 排程：逐幣隔離、HYPE 現貨來源、失敗補送、階段去重
     const env: WaveEnv = { DB: binding as unknown as WaveEnv['DB'], WAVE_RADAR_ENABLED: 'true', SLACK_API_TOKEN: 'test-token', SLACK_CHANNEL_ID: 'test-channel' };
     await runWaveRadar({ ...env, WAVE_RADAR_ENABLED: 'false' });
     assert.equal(marketRequests, 0);
-    await runWaveRadar(env);
+    // 幣數超過單輪上限時需要多輪才會掃完(受 Cloudflare subrequest 額度限制)，
+    // 依 checked_at 輪替排序確保每輪處理不同的幣，最終覆蓋整份名單。
+    for (let round = 0; round < Math.ceil(WAVE_SYMBOLS.length / 12) + 1; round++) {
+      await runWaveRadar(env);
+    }
     const rows = await binding.prepare('SELECT * FROM wave_radar').all();
     assert.equal(rows.results.length, WAVE_SYMBOLS.length);
     // ASTER 所有來源皆故障：仍記錄錯誤且不影響其他幣種(逐幣隔離)
@@ -75,8 +79,9 @@ test('D1 排程：逐幣隔離、HYPE 現貨來源、失敗補送、階段去重
     await runWaveRadar(env);
     // 只有先前失敗的 ASTER 需要重抓，其餘幣種同一根 K 線不重複請求
     assert.equal(marketRequests - requestsBeforeRetry, 1);
-    // 通知每輪最多送 20 則(避免轟炸 Slack)，幣種數超過批次量時會分多輪送完
-    const DELIVERY_BATCH = 20;
+    // 通知每輪最多送 10 則(同時受 Slack 保護與 Worker subrequest 額度限制)，
+    // 幣種數超過批次量時會分多輪送完
+    const DELIVERY_BATCH = 10;
     assert.equal(sent, Math.min(DELIVERY_BATCH, WAVE_SYMBOLS.length));
     const requestsAfterRetry = marketRequests;
     // 重複執行直到佇列清空，驗證分批送達最終會把所有通知送出且不重抓行情

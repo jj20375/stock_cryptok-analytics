@@ -20,32 +20,51 @@ const LEASE_MS = 12 * 60 * 1000;
 const SCAN_BUDGET_MS = 8 * 60 * 1000;
 
 /**
+ * 【Cloudflare Workers subrequest 預算】單次 Worker 執行的子請求有上限
+ * (免費方案 50，超過會出現 "Too many subrequests")；行情 fetch、Slack 發送與
+ * D1 binding 呼叫都會計入。實測 45 幣一次掃完會在第 20 檔左右耗盡額度。
+ *
+ * 因此本輪掃描的幣數上限訂為 12：
+ *   最差情況 = 12 幣 × 3 個備援來源(36) + 租約/寫入等 D1 操作 ≈ 仍需留餘裕，
+ *   故同時把每檔的 D1 操作降到最少(見下方最佳化)，並把 Slack 單輪發送量降為 10。
+ * 45 檔約 4 輪(60 分鐘)可輪完一遍；4h K 線每 4 小時才換一根，覆蓋頻率綽綽有餘。
+ */
+const MAX_SYMBOLS_PER_SCAN = 12;
+// 每 N 檔才續租一次，避免逐檔續租佔用 subrequest 額度
+const LEASE_RENEW_EVERY = 4;
+
+/**
  * 逐幣掃描，外部行情逾時後逐幣隔離，避免單幣故障拖垮全表。
- * 掃描順序依「上次檢查時間由舊到新」輪替，確保時間預算用完時未處理的幣下輪優先。
+ * 掃描順序依「上次檢查時間由舊到新」輪替，確保額度或時間用盡時未處理的幣下輪優先。
  */
 async function scanSymbols(db: ReturnType<typeof drizzle>, owner: string) {
   const startedAt = Date.now();
-  // 一次取得所有幣的上次檢查時間，據此排序輪替(未掃過的幣視為最舊、最優先)
-  const checkedRows = await db.select({ symbol: waveRadar.symbol, checkedAt: waveRadar.checkedAt }).from(waveRadar);
-  const lastChecked = new Map(checkedRows.map(r => [r.symbol, r.checkedAt]));
+  // 一次撈完所有幣的快照(含 snapshot_json)，迴圈內不再逐檔查詢，節省 subrequest 額度
+  const existingRows = await db.select().from(waveRadar);
+  const rowBySymbol = new Map(existingRows.map(r => [r.symbol, r]));
   const ordered = [...WAVE_SYMBOLS].sort(
-    (a, b) => (lastChecked.get(a.symbol) ?? 0) - (lastChecked.get(b.symbol) ?? 0)
+    (a, b) => (rowBySymbol.get(a.symbol)?.checkedAt ?? 0) - (rowBySymbol.get(b.symbol)?.checkedAt ?? 0)
   );
 
+  let processed = 0;
   for (const { symbol } of ordered) {
     const now = Date.now();
-    // 時間預算用盡就收尾，把剩餘幣種留給下一輪，避免超出租約後才被中斷
-    if (now - startedAt >= SCAN_BUDGET_MS) return;
-    const [lease] = await db.select().from(waveLease).where(eq(waveLease.id, 'scan'));
-    if (lease?.owner !== owner || lease.expiresAt <= now) return;
-    // 逐幣續租，避免連續外部逾時使最後幾個幣寫入時已失去排程所有權。
-    await db.update(waveLease).set({ expiresAt: now + LEASE_MS })
-      .where(and(eq(waveLease.id, 'scan'), eq(waveLease.owner, owner)));
-    const [row] = await db.select().from(waveRadar).where(eq(waveRadar.symbol, symbol));
+    // 時間或幣數預算用盡就收尾，把剩餘幣種留給下一輪(輪替排序確保它們下輪優先)
+    if (now - startedAt >= SCAN_BUDGET_MS || processed >= MAX_SYMBOLS_PER_SCAN) return;
+    // 續租改為每 LEASE_RENEW_EVERY 檔一次，兼顧所有權維持與 subrequest 額度
+    if (processed % LEASE_RENEW_EVERY === 0) {
+      const [lease] = await db.select().from(waveLease).where(eq(waveLease.id, 'scan'));
+      if (lease?.owner !== owner || lease.expiresAt <= now) return;
+      await db.update(waveLease).set({ expiresAt: now + LEASE_MS })
+        .where(and(eq(waveLease.id, 'scan'), eq(waveLease.owner, owner)));
+    }
+    const row = rowBySymbol.get(symbol);
     const previous: WaveSnapshot | null = row ? JSON.parse(row.snapshotJson) : null;
     const lastClosedOpen = Math.floor(now / WAVE_INTERVAL_MS) * WAVE_INTERVAL_MS - WAVE_INTERVAL_MS;
     // 已成功處理的同一根 K 線不重抓、不重算；錯誤會在下輪重試。
+    // 此分支不發出任何外部請求，因此不計入本輪的幣數預算。
     if (previous && !previous.error && previous.signal.barTime === lastClosedOpen) continue;
+    processed++;
     try {
       // minLatestOpenTime:要求資料必須含最新一根已收盤 K 線,否則自動改用下一個資料來源,
       // 避免單一交易所該幣流動性低或延遲時整檔停擺(ZEC 曾因此持續失敗)。
@@ -81,8 +100,10 @@ async function scanSymbols(db: ReturnType<typeof drizzle>, owner: string) {
 /** 發送成功後才標記；Slack 已接收但回應遺失時可能重送，無法保證跨系統恰好一次。 */
 async function deliverNotifications(db: ReturnType<typeof drizzle>, env: WaveEnv) {
   if (!env.SLACK_API_TOKEN || !env.SLACK_CHANNEL_ID) return;
+  // 單輪發送量壓在 10 則：Slack 發送同樣計入 Worker 的 subrequest 額度，
+  // 必須與行情抓取共用預算；未送完的通知會保留在佇列，下一輪繼續補送。
   const pending = await db.select().from(waveNotifications).where(isNull(waveNotifications.sentAt))
-    .orderBy(asc(waveNotifications.createdAt)).limit(20);
+    .orderBy(asc(waveNotifications.createdAt)).limit(10);
   for (const event of pending) {
     try {
       const response = await fetch('https://slack.com/api/chat.postMessage', {
