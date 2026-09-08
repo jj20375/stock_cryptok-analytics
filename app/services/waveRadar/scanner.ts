@@ -68,8 +68,11 @@ async function scanSymbols(db: ReturnType<typeof drizzle>, owner: string) {
     try {
       // minLatestOpenTime:要求資料必須含最新一根已收盤 K 線,否則自動改用下一個資料來源,
       // 避免單一交易所該幣流動性低或延遲時整檔停擺(ZEC 曾因此持續失敗)。
+      // requireContiguous:資料有缺口時也換源。低流動性幣在某些交易所會缺 K 線,
+      // 這種資料抓得到卻無法判讀,若不在此換源會一路失敗到下游驗證(HYPE 曾如此)。
       const result = await fetchBinanceRange(symbol, '4h', lastClosedOpen - 359 * WAVE_INTERVAL_MS, now, 1, {
         minLatestOpenTime: lastClosedOpen,
+        requireContiguous: true,
       });
       validateWaveCandles(result.candles, now);
       const next = nextWaveSnapshot(result.candles, previous, result.source);

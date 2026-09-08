@@ -159,6 +159,14 @@ export interface FetchRangeOptions {
    * 波段雷達需要最新已收盤 K 線,會帶入此參數;歷史回測不需要,省略即可。
    */
   minLatestOpenTime?: number;
+  /**
+   * 要求回傳的 K 線必須等間距連續(無缺口),否則改用下一個來源。
+   * 低流動性標的在某些交易所會出現「該時段無成交 → K 線缺漏」,
+   * 這種資料通過了 HTTP 抓取卻無法用於指標計算,必須在來源層就換家,
+   * 否則錯誤要等到下游驗證才爆出來、也不會觸發備援(HYPE 曾因此持續失敗)。
+   * 回測抓長區間時交易所早期可能真有停機缺口,故預設關閉,只有即時掃描才啟用。
+   */
+  requireContiguous?: boolean;
 }
 
 /** 以單一來源抓取整個區間(不做備援切換),供 fetchBinanceRange 逐一嘗試各來源。 */
@@ -240,6 +248,19 @@ export const fetchBinanceRange = async (
         const latest = result.candles.at(-1)?.openTime ?? -Infinity;
         if (latest < options.minLatestOpenTime) {
           lastError = new Error(`${source} 最新 K 線過期(需要 ${new Date(options.minLatestOpenTime).toISOString()} 之後的資料)`);
+          continue;
+        }
+      }
+
+      // 資料有缺口時同樣換源:缺口會讓指標與日線合成失真,下游只能整檔停判
+      if (options.requireContiguous) {
+        const gapAt = result.candles.findIndex(
+          (c, i) => i > 0 && c.openTime !== result.candles[i - 1].openTime + intervalMs
+        );
+        if (gapAt > 0) {
+          lastError = new Error(
+            `${source} K 線不連續(於 ${new Date(result.candles[gapAt].openTime).toISOString()} 出現缺口)`
+          );
           continue;
         }
       }
