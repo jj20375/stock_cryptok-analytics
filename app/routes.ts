@@ -18,6 +18,7 @@ export default [
   route("api/backtest", "routes/api.backtest.ts"),
   route("backtest", "routes/backtest.tsx"),
   route("api/warroom", "routes/api.warroom.ts"),
+  route("api/webhook/tradingview/:secret", "routes/api.webhook.tradingview.ts"),
   route("warroom", "routes/warroom.tsx"),
   route("wave-radar", "routes/wave-radar.tsx"),
   route("login", "routes/login.tsx"),

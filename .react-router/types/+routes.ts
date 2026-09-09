@@ -64,6 +64,11 @@ type Pages = {
   "/api/warroom": {
     params: {};
   };
+  "/api/webhook/tradingview/:secret": {
+    params: {
+      "secret": string;
+    };
+  };
   "/warroom": {
     params: {};
   };
@@ -87,7 +92,7 @@ type Pages = {
 type RouteFiles = {
   "root.tsx": {
     id: "root";
-    page: "/" | "/dashboard" | "/stock-analysis" | "/api/top50" | "/api/stock/*" | "/api/gemini" | "/api/logout" | "/api/test-telegram" | "/api/test-slack" | "/api/test-strategy" | "/api/test-crypto" | "/api/portfolio" | "/api/analyze-stock" | "/api/run-report" | "/api/backtest" | "/backtest" | "/api/warroom" | "/warroom" | "/wave-radar" | "/login" | "/register" | "/portfolio" | "/settings";
+    page: "/" | "/dashboard" | "/stock-analysis" | "/api/top50" | "/api/stock/*" | "/api/gemini" | "/api/logout" | "/api/test-telegram" | "/api/test-slack" | "/api/test-strategy" | "/api/test-crypto" | "/api/portfolio" | "/api/analyze-stock" | "/api/run-report" | "/api/backtest" | "/backtest" | "/api/warroom" | "/api/webhook/tradingview/:secret" | "/warroom" | "/wave-radar" | "/login" | "/register" | "/portfolio" | "/settings";
   };
   "routes/home.tsx": {
     id: "routes/home";
@@ -157,6 +162,10 @@ type RouteFiles = {
     id: "routes/api.warroom";
     page: "/api/warroom";
   };
+  "routes/api.webhook.tradingview.ts": {
+    id: "routes/api.webhook.tradingview";
+    page: "/api/webhook/tradingview/:secret";
+  };
   "routes/warroom.tsx": {
     id: "routes/warroom";
     page: "/warroom";
@@ -202,6 +211,7 @@ type RouteModules = {
   "routes/api.backtest": typeof import("./app/routes/api.backtest.ts");
   "routes/backtest": typeof import("./app/routes/backtest.tsx");
   "routes/api.warroom": typeof import("./app/routes/api.warroom.ts");
+  "routes/api.webhook.tradingview": typeof import("./app/routes/api.webhook.tradingview.ts");
   "routes/warroom": typeof import("./app/routes/warroom.tsx");
   "routes/wave-radar": typeof import("./app/routes/wave-radar.tsx");
   "routes/login": typeof import("./app/routes/login.tsx");

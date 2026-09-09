@@ -15,6 +15,9 @@ WAVE_RADAR_ENABLED = "true"
 # TWELVE_DATA_API_KEY = ""
 # MASTER_ENCRYPTION_KEY = ""
 # INVITATION_CODE = ""
+# TradingView Webhook 密鑰：wrangler secret put TRADINGVIEW_WEBHOOK_SECRET
+# （正式環境務必用不同於本機 .dev.vars 的隨機值，外洩即等同任何人都能推送假訊號）
+# TRADINGVIEW_WEBHOOK_SECRET = ""
 
 [[d1_databases]]
 binding = "DB"
