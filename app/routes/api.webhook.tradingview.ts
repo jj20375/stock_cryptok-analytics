@@ -27,6 +27,8 @@
  *    {{ticker}}/{{close}} 等是 TradingView 的內建佔位符,觸發當下會自動代入實際數值;
  *    {{strategy.order.action}} 只有「策略(strategy)」型腳本才有 buy/sell 值,
  *    純指標(indicator)腳本請把 action 欄位改成寫死的固定文字(例如每個警報條件各自設一個)。
+ * 4. 選用欄位 "market":"tw_stock" 可將訊號改送台股頻道(TW_STOCK_SLACK_CHANNEL_ID),
+ *    省略此欄位時預設沿用虛擬幣即時進場頻道,維持既有 Alert 的相容性。
  */
 
 import type { ActionFunctionArgs, LoaderFunctionArgs } from 'react-router';
@@ -87,22 +89,27 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
   const price = typeof payload.price === 'number' ? payload.price : null;
   const note = typeof payload.note === 'string' ? payload.note : null;
   const actionLabel = actionRaw ? (ACTION_LABELS[actionRaw] ?? `⚠️ ${actionRaw}`) : '⚠️ 未提供方向';
+  /** 未帶 market 欄位時預設 crypto，維持既有虛擬幣 Alert 相容性；台股改用 NT$ 顯示價格。 */
+  const market = typeof payload.market === 'string' ? payload.market.toLowerCase() : 'crypto';
+  const priceCurrency = market === 'tw_stock' ? 'NT$' : '$';
 
   // 【詳細繁體中文註解:外部 API 副作用】此處呼叫 Slack chat.postMessage 對外發送訊息,
   // 失敗只記錄 log、不視為整體請求失敗 — 避免 Slack 暫時性問題導致 TradingView 誤判
   // webhook 失敗而重試轟炸。
   const slackToken = env.SLACK_API_TOKEN || process.env.SLACK_API_TOKEN;
-  /** TradingView 虛擬幣警報改送獨立即時進場頻道；不 fallback 到一般報表頻道。 */
-  const slackChannel = env.CRYPTO_ENTRY_SLACK_CHANNEL_ID || process.env.CRYPTO_ENTRY_SLACK_CHANNEL_ID;
+  /** market 決定投遞頻道：台股訊號走「台股即時進場價格」，其餘沿用虛擬幣即時進場頻道；兩者都不 fallback 到一般報表頻道。 */
+  const cryptoChannel = env.CRYPTO_ENTRY_SLACK_CHANNEL_ID || process.env.CRYPTO_ENTRY_SLACK_CHANNEL_ID;
+  const twStockChannel = env.TW_STOCK_SLACK_CHANNEL_ID || process.env.TW_STOCK_SLACK_CHANNEL_ID;
+  const slackChannel = market === 'tw_stock' ? twStockChannel : cryptoChannel;
   if (slackToken && slackChannel) {
     /** 卡片樣式跟其他雷達（潛力幣／波段／永續）對齊，靠 📡 圖示與「TradingView」字樣區分來源。 */
     const title = `📡 ${escapeMrkdwn(symbol)}｜TradingView ${actionLabel}`.slice(0, 150);
-    const fallback = `${title}${price != null ? `｜進場參考 $${price}` : ''}${note ? `｜${note.slice(0, 100)}` : ''}`;
+    const fallback = `${title}${price != null ? `｜進場參考 ${priceCurrency}${price}` : ''}${note ? `｜${note.slice(0, 100)}` : ''}`;
     const blocks: Array<Record<string, unknown>> = [
       { type: 'header', text: { type: 'plain_text', text: title, emoji: true } },
       { type: 'section', fields: [
         { type: 'mrkdwn', text: `*方向*\n${escapeMrkdwn(actionLabel)}` },
-        ...(price != null ? [{ type: 'mrkdwn', text: `*進場參考價*\n$${price}` }] : []),
+        ...(price != null ? [{ type: 'mrkdwn', text: `*進場參考價*\n${priceCurrency}${price}` }] : []),
       ] },
       ...(note ? [{ type: 'section' as const, text: { type: 'mrkdwn' as const, text: escapeMrkdwn(note.slice(0, 180)) } }] : []),
       { type: 'context', elements: [{ type: 'mrkdwn', text: '外部策略訊號｜系統未驗證策略邏輯｜未自動下單' }] },
