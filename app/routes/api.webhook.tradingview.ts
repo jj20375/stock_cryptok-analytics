@@ -89,15 +89,13 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
   // 失敗只記錄 log、不視為整體請求失敗 — 避免 Slack 暫時性問題導致 TradingView 誤判
   // webhook 失敗而重試轟炸。
   const slackToken = env.SLACK_API_TOKEN || process.env.SLACK_API_TOKEN;
-  const slackChannel = env.SLACK_CHANNEL_ID || process.env.SLACK_CHANNEL_ID;
+  /** TradingView 虛擬幣警報改送獨立即時進場頻道；不 fallback 到一般報表頻道。 */
+  const slackChannel = env.CRYPTO_ENTRY_SLACK_CHANNEL_ID || process.env.CRYPTO_ENTRY_SLACK_CHANNEL_ID;
   if (slackToken && slackChannel) {
-    const msg =
-      `*📡 [TradingView 外部訊號]*\n\n` +
-      `• 商品:*${symbol}*\n` +
-      `• 方向:${actionLabel}\n` +
-      (price != null ? `• 觸發價:$${price}\n` : '') +
-      (note ? `• 說明:${note}\n` : '') +
-      `\n_⚠️ 此訊號來自 TradingView,系統未驗證其策略邏輯正確性,亦未自動下單,請自行確認後決定是否操作。_`;
+    const msg = `📡 *${symbol}｜TradingView ${actionLabel}*\n` +
+      (price != null ? `進場參考 $${price}\n` : '') +
+      (note ? `${note.slice(0, 180)}\n` : '') +
+      `外部策略訊號，未自動下單。`;
     const sent = await sendSlackMessage(slackToken, slackChannel, msg);
     if (!sent) console.error('🔥 [TradingView Webhook] Slack 推播失敗,訊號未送達');
   } else {

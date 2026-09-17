@@ -2,7 +2,13 @@
  * 【詳細繁體中文註解】：Slack 通知服務
  * 使用 Slack Web API (chat.postMessage) 發送訊息
  */
-export async function sendSlackMessage(token: string, channel: string, text: string) {
+export interface SlackPostPayload {
+  text: string;
+  blocks?: Array<Record<string, unknown>>;
+}
+
+/** Block Kit 與純文字共用同一個發送入口；fallback text 確保手機通知仍能顯示摘要。 */
+export async function sendSlackPost(token: string, channel: string, payload: SlackPostPayload) {
   try {
     const response = await fetch("https://slack.com/api/chat.postMessage", {
       method: "POST",
@@ -12,8 +18,7 @@ export async function sendSlackMessage(token: string, channel: string, text: str
       },
       body: JSON.stringify({
         channel: channel,
-        text: text,
-        // 可以加上 mrkdwn: true 來支援 Markdown 格式
+        ...payload,
         mrkdwn: true,
       }),
     });
@@ -29,4 +34,9 @@ export async function sendSlackMessage(token: string, channel: string, text: str
     console.error("❌ Failed to send Slack message:", error);
     return false;
   }
+}
+
+/** 保留既有純文字呼叫介面，避免其他通知服務因卡片改版受到影響。 */
+export async function sendSlackMessage(token: string, channel: string, text: string) {
+  return sendSlackPost(token, channel, { text });
 }
