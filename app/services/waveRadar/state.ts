@@ -1,7 +1,9 @@
-import cryptoWave, { analyzeWave, WAVE_INTERVAL_MS, WAVE_LABELS, type WaveSignal } from '../strategy/strategies/cryptoWave';
+/** @file 波段快照與追蹤失效；同時附加無交易副作用的品質分析。 */
+import cryptoWave, { analyzeWave, WAVE_INTERVAL_MS, type WaveSignal } from '../strategy/strategies/cryptoWave';
 import { IndicatorCache } from '../strategy/indicatorCache';
 import type { Candle, OpenPositionState } from '../strategy/types';
-import { waveSourceLabel } from '../cryptoUniverse';
+import { analyzeWaveQuality, type WaveAnalysis, type WaveSetup } from './analysis';
+export { formatWaveCard as waveMessage } from './notifications';
 
 export interface WaveSnapshot {
   signal: WaveSignal;
@@ -10,6 +12,9 @@ export interface WaveSnapshot {
   error: string | null;
   /** 本次快照實際採用的行情來源代碼(備援機制可能切換來源,故需逐次記錄) */
   source?: string | null;
+  /** 舊快照可能尚無分析；頁面應顯示等待，不能補造分數或走勢。 */
+  analysis?: WaveAnalysis;
+  analysisNotifiedAt?: Partial<Record<WaveSetup, number>>;
 }
 
 /** 檢查最近 360 根連續、有效且已收盤；中斷資料不可當成正常市場訊號。 */
@@ -57,17 +62,6 @@ export function nextWaveSnapshot(candles: Candle[], previous: WaveSnapshot | nul
   if (!tracking && signal.phase !== 'EXIT' && (signal.phase === 'BREAKOUT' || signal.phase === 'RETEST')) {
     tracking = { entryTime: current.openTime, referencePrice: current.close, stopPrice: current.close * (1 - signal.stopLossPct! / 100) };
   }
-  return { signal, tracking, error: null, source: source ?? null };
-}
-
-export function waveMessage(symbol: string, snapshot: WaveSnapshot) {
-  const s = snapshot.signal;
-  const price = (value: number | null | undefined) => value == null ? '尚無' : value.toPrecision(6);
-  return `*波段雷達｜${symbol}｜${WAVE_LABELS[s.phase]}*\n` +
-    `資料：${waveSourceLabel(snapshot.source)}，4h 收盤 ${new Date(s.barTime + WAVE_INTERVAL_MS).toISOString()}\n` +
-    `參考收盤：${price(s.price)} USDT｜突破位：${price(s.breakout)}\n` +
-    `量能：${s.volumeRatio?.toFixed(2) ?? '—'} 倍前期均量\n` +
-    `追蹤失效參考：${price(snapshot.tracking?.stopPrice)} USDT\n` +
-    `${s.reason}\n` +
-    `翻倍為研究目標；僅訊號觀察，未下單。突破後跳空與滑價可能改變風險，回測請用下一根開盤成交。`;
+  return { signal, tracking, error: null, source: source ?? null,
+    analysis: analyzeWaveQuality(candles, signal), analysisNotifiedAt: previous?.analysisNotifiedAt ?? {} };
 }

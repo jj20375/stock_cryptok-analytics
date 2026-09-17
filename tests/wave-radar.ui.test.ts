@@ -33,6 +33,8 @@ test('頁面包含所有指定幣、回測連結及翻倍目標限制；過期�
   const html = await renderWavePreview(false);
   for (const name of ['SUI', 'ASTER', 'ADA', 'DOGE', 'BNB', 'HYPE', 'XRP']) assert.ok(html.includes(name));
   assert.ok(html.includes('波段啟動'));
+  assert.ok(html.includes('4H 趨勢回踩'));
+  assert.ok(html.includes('相對 BTC 強勢輪動'));
   assert.ok(html.includes('symbol=XRPUSDT&amp;strategyId=crypto_wave'));
   assert.ok(html.includes('不能相加當成投資組合報酬'));
   assert.ok(!(await renderWavePreview(true)).includes('波段啟動'));

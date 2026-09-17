@@ -25,7 +25,8 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
 
     const analysis = await evaluateCryptoStrategy(symbol, '4h');
     const slackToken = env.SLACK_API_TOKEN || process.env.SLACK_API_TOKEN;
-    const slackChannel = env.SLACK_CHANNEL_ID || process.env.SLACK_CHANNEL_ID;
+    /** 手動虛擬幣測試同樣只送到新的即時進場頻道，避免測試訊息污染日報頻道。 */
+    const slackChannel = env.CRYPTO_ENTRY_SLACK_CHANNEL_ID || process.env.CRYPTO_ENTRY_SLACK_CHANNEL_ID;
 
     if (analysis.signal === 'HOLD') {
       return Response.json({ 
@@ -53,13 +54,10 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
 
     const aiAdvice = await getAIResponse(prompt, {}, env);
     
-    const slackMsg = `*🧪 [手動測試] ${signalColor} 虛擬幣 AI 趨勢預警*\n\n` +
-      `💰 商品：*${symbol}*\n` +
-      `📈 訊號：*${analysis.signal}*\n` +
-      `📍 現價：$${analysis.price}\n` +
-      `📝 理由：${analysis.reason}\n\n` +
-      `💡 *AI 大師點評：*\n${aiAdvice}\n\n` +
-      `_⚠️ 測試訊息，請勿直接作為交易依據。_`;
+    const slackMsg = `🧪 *${symbol}｜${signalColor}*\n` +
+      `進場參考 $${analysis.price}｜${analysis.reason}\n` +
+      `AI：${aiAdvice}\n` +
+      `測試訊息，非下單指令。`;
 
     if (slackToken && slackChannel) {
       await sendSlackMessage(slackToken, slackChannel, slackMsg);

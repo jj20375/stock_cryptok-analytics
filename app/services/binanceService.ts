@@ -17,7 +17,8 @@ export const getKlines = async (symbol: string, interval: string, limit: number 
   // 【詳細繁體中文註解】：嘗試從幣安官方主要 API 取得資料
   try {
     const binanceUrl = `${BINANCE_API_URL}/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
-    const response = await fetch(binanceUrl);
+    /** 公開行情主來源六秒逾時後走既有備援，避免大盤風控讓整個戰情室無限等待。 */
+    const response = await fetch(binanceUrl, { signal: AbortSignal.timeout(6000) });
     if (response.ok) {
       const data = await response.json() as any[];
       return data.map(k => ({
@@ -42,7 +43,8 @@ export const getKlines = async (symbol: string, interval: string, limit: number 
     const okxInterval = interval.replace('h', 'H'); // OKX 的小時單位必須為大寫 H
     const okxUrl = `https://www.okx.com/api/v5/market/candles?instId=${okxSymbol}&bar=${okxInterval}&limit=${limit}`;
     
-    const response = await fetch(okxUrl);
+    /** 備援同樣設逾時；兩者失敗交由風控明確回報資料不足。 */
+    const response = await fetch(okxUrl, { signal: AbortSignal.timeout(6000) });
     if (!response.ok) {
       throw new Error(`OKX 備用節點回傳錯誤: ${response.statusText}`);
     }

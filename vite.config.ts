@@ -3,11 +3,17 @@ import { reactRouter } from "@react-router/dev/vite";
 import { cloudflareDevProxy } from "@react-router/dev/vite/cloudflare";
 import path from 'path';
 import {defineConfig, loadEnv} from 'vite';
+import { createLocalRadars } from './dev/localRadars';
 
 export default defineConfig(({mode}) => {
   const env = loadEnv(mode, '.', '');
+  const localRadars = createLocalRadars();
   return {
-    plugins: [cloudflareDevProxy(), reactRouter(), tailwindcss()],
+    plugins: [cloudflareDevProxy({ getLoadContext({ context }) {
+      /** Vite 不會觸發 Worker scheduled；首次本機請求啟動獨立觀察排程，沿用同一個本機 DB。 */
+      localRadars.start(context.cloudflare.env as Record<string, unknown>);
+      return context;
+    } }), localRadars.plugin, reactRouter(), tailwindcss()],
     define: {
       'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
       'process.env.TWELVE_DATA_API_KEY': JSON.stringify(env.TWELVE_DATA_API_KEY || 'd3dc21e6cdba4e3a89f0c7620d6206c4'),

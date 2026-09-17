@@ -63,7 +63,8 @@ export interface FundingRateInfo {
  */
 export const fetchFundingRate = async (symbol: string): Promise<FundingRateInfo | null> => {
   try {
-    const response = await fetch(`https://fapi.binance.com/fapi/v1/premiumIndex?symbol=${symbol}`);
+    /** 持倉成本是輔助資料，八秒逾時就顯示未知，不能拖住整頁量價訊號。 */
+    const response = await fetch(`https://fapi.binance.com/fapi/v1/premiumIndex?symbol=${symbol}`, { signal: AbortSignal.timeout(8000) });
     if (!response.ok) return null;
     const data = (await response.json()) as any;
     return {

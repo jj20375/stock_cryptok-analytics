@@ -1,23 +1,28 @@
+/** @file 波段掃描及使用者授權的 Slack 通知；額外分析與原快照共用行情。 */
 import { drizzle } from 'drizzle-orm/d1';
-import { and, asc, eq, isNull, lt } from 'drizzle-orm';
+import { and, desc, eq, gte, isNull, lt } from 'drizzle-orm';
 import { waveLease, waveNotifications, waveRadar } from '../../db/waveSchema';
 import { WAVE_SYMBOLS } from '../cryptoUniverse';
 import { fetchBinanceRange } from '../marketData/binanceHistory';
 import { WAVE_INTERVAL_MS } from '../strategy/strategies/cryptoWave';
 import { nextWaveSnapshot, validateWaveCandles, waveMessage, type WaveSnapshot } from './state';
+import { selectWaveNotice } from './notifications';
+import { WAVE_ANALYSIS_VERSION } from './analysis';
+import { slackPostFromStored } from '../slack/cryptoSignalCard';
 
 /** 排程總開關與 Slack 設定僅由 Worker 環境提供；不讀取或操作交易金鑰。 */
 export interface WaveEnv {
   DB: Parameters<typeof drizzle>[0];
   WAVE_RADAR_ENABLED?: string;
   SLACK_API_TOKEN?: string;
+  /** 虛擬幣訊號專用頻道；一般報表頻道不作 fallback，避免再次混流。 */
+  CRYPTO_ENTRY_SLACK_CHANNEL_ID?: string;
   SLACK_CHANNEL_ID?: string;
 }
-const LEASE_MS = 12 * 60 * 1000;
-// 單輪掃描的時間預算：留在 cron 間隔(15 分)與租約(12 分)之內。
-// 幣種數量擴充後，最差情況(主來源逾時 + 備援逾時)可能拖很久，因此以預算主動收尾，
-// 未掃到的幣會在下一輪優先處理(依 checked_at 由舊到新輪替)，確保長期覆蓋所有幣種。
-const SCAN_BUDGET_MS = 8 * 60 * 1000;
+const LEASE_MS = 2 * 60 * 1000;
+// Cloudflare 排程需在短時間內完成；六檔並行且即時行情每來源三秒逾時，
+// 單一交易所卡住時仍能發布其他幣種並正常釋放租約。
+const SCAN_BUDGET_MS = 20_000;
 
 /**
  * 【Cloudflare Workers subrequest 預算】單次 Worker 執行的子請求有上限
@@ -30,14 +35,15 @@ const SCAN_BUDGET_MS = 8 * 60 * 1000;
  * 45 檔約 4 輪(60 分鐘)可輪完一遍；4h K 線每 4 小時才換一根，覆蓋頻率綽綽有餘。
  */
 const MAX_SYMBOLS_PER_SCAN = 12;
-// 每 N 檔才續租一次，避免逐檔續租佔用 subrequest 額度
-const LEASE_RENEW_EVERY = 4;
+const SCAN_CONCURRENCY = 6;
+const MAX_NOTIFICATIONS_PER_RUN = 3;
+export const waveCryptoSlackChannel = (env: WaveEnv) => env.CRYPTO_ENTRY_SLACK_CHANNEL_ID?.trim() || null;
 
 /**
  * 逐幣掃描，外部行情逾時後逐幣隔離，避免單幣故障拖垮全表。
  * 掃描順序依「上次檢查時間由舊到新」輪替，確保額度或時間用盡時未處理的幣下輪優先。
  */
-async function scanSymbols(db: ReturnType<typeof drizzle>, owner: string) {
+async function scanSymbols(db: ReturnType<typeof drizzle>, owner: string, notifications: boolean) {
   const startedAt = Date.now();
   // 一次撈完所有幣的快照(含 snapshot_json)，迴圈內不再逐檔查詢，節省 subrequest 額度
   const existingRows = await db.select().from(waveRadar);
@@ -46,44 +52,36 @@ async function scanSymbols(db: ReturnType<typeof drizzle>, owner: string) {
     (a, b) => (rowBySymbol.get(a.symbol)?.checkedAt ?? 0) - (rowBySymbol.get(b.symbol)?.checkedAt ?? 0)
   );
 
-  let processed = 0;
-  for (const { symbol } of ordered) {
-    const now = Date.now();
-    // 時間或幣數預算用盡就收尾，把剩餘幣種留給下一輪(輪替排序確保它們下輪優先)
-    if (now - startedAt >= SCAN_BUDGET_MS || processed >= MAX_SYMBOLS_PER_SCAN) return;
-    // 續租改為每 LEASE_RENEW_EVERY 檔一次，兼顧所有權維持與 subrequest 額度
-    if (processed % LEASE_RENEW_EVERY === 0) {
-      const [lease] = await db.select().from(waveLease).where(eq(waveLease.id, 'scan'));
-      if (lease?.owner !== owner || lease.expiresAt <= now) return;
-      await db.update(waveLease).set({ expiresAt: now + LEASE_MS })
-        .where(and(eq(waveLease.id, 'scan'), eq(waveLease.owner, owner)));
-    }
+  const scanNow = Date.now();
+  const lastClosedOpen = Math.floor(scanNow / WAVE_INTERVAL_MS) * WAVE_INTERVAL_MS - WAVE_INTERVAL_MS;
+  const targets = ordered.filter(({ symbol }) => {
     const row = rowBySymbol.get(symbol);
     const previous: WaveSnapshot | null = row ? JSON.parse(row.snapshotJson) : null;
-    const lastClosedOpen = Math.floor(now / WAVE_INTERVAL_MS) * WAVE_INTERVAL_MS - WAVE_INTERVAL_MS;
-    // 已成功處理的同一根 K 線不重抓、不重算；錯誤會在下輪重試。
-    // 此分支不發出任何外部請求，因此不計入本輪的幣數預算。
-    if (previous && !previous.error && previous.signal.barTime === lastClosedOpen) continue;
-    processed++;
+    return !(previous && !previous.error && previous.signal.barTime === lastClosedOpen &&
+      previous.analysis?.version === WAVE_ANALYSIS_VERSION);
+  }).slice(0, MAX_SYMBOLS_PER_SCAN);
+
+  const scanSymbol = async ({ symbol }: { symbol: string }) => {
+    const now = Date.now();
+    const row = rowBySymbol.get(symbol);
+    const previous: WaveSnapshot | null = row ? JSON.parse(row.snapshotJson) : null;
     try {
-      // minLatestOpenTime:要求資料必須含最新一根已收盤 K 線,否則自動改用下一個資料來源,
-      // 避免單一交易所該幣流動性低或延遲時整檔停擺(ZEC 曾因此持續失敗)。
-      // requireContiguous:資料有缺口時也換源。低流動性幣在某些交易所會缺 K 線,
-      // 這種資料抓得到卻無法判讀,若不在此換源會一路失敗到下游驗證(HYPE 曾如此)。
+      // 即時排程將每個來源限制三秒；主來源異常時仍會依序嘗試備援，但不容許單幣占滿整次 Worker。
       const result = await fetchBinanceRange(symbol, '4h', lastClosedOpen - 359 * WAVE_INTERVAL_MS, now, 1, {
         minLatestOpenTime: lastClosedOpen,
         requireContiguous: true,
+        requestTimeoutMs: 3000,
       });
       validateWaveCandles(result.candles, now);
       const next = nextWaveSnapshot(result.candles, previous, result.source);
+      /** 品質分析可在階段未變時首次成立；冷卻狀態和待發事件一併保存。 */
+      const notice = notifications ? selectWaveNotice(next, previous) : null;
       const updated = { symbol, snapshotJson: JSON.stringify(next), checkedAt: now };
       const save = db.insert(waveRadar).values(updated).onConflictDoUpdate({ target: waveRadar.symbol, set: updated });
       // 只有階段改變才產生通知；初次掃描亦可通知當前候選，但 WAIT 不洗版。
-      const notify = next.signal.phase !== 'WAIT' && next.signal.phase !== previous?.signal.phase;
-      if (notify) {
-        // 交易式批次使狀態和待發事件同時落地，避免先改狀態後當機造成永久漏報。
+      if (notice) {
         await db.batch([save, db.insert(waveNotifications).values({
-          id: `${symbol}:${next.signal.barTime}:${next.signal.phase}`,
+          id: `${symbol}:${next.signal.barTime}:${notice.key}`,
           message: waveMessage(symbol, next), createdAt: now,
         }).onConflictDoNothing()]);
       } else await save;
@@ -97,25 +95,47 @@ async function scanSymbols(db: ReturnType<typeof drizzle>, owner: string) {
       const updated = { symbol, snapshotJson: JSON.stringify(failed), checkedAt: now };
       await db.insert(waveRadar).values(updated).onConflictDoUpdate({ target: waveRadar.symbol, set: updated });
     }
+  };
+
+  for (let start = 0; start < targets.length; start += SCAN_CONCURRENCY) {
+    const now = Date.now();
+    if (now - startedAt >= SCAN_BUDGET_MS) return;
+    const [lease] = await db.select().from(waveLease).where(eq(waveLease.id, 'scan'));
+    if (lease?.owner !== owner || lease.expiresAt <= now) return;
+    await db.update(waveLease).set({ expiresAt: now + LEASE_MS })
+      .where(and(eq(waveLease.id, 'scan'), eq(waveLease.owner, owner)));
+    await Promise.all(targets.slice(start, start + SCAN_CONCURRENCY).map(scanSymbol));
   }
 }
 
 /** 發送成功後才標記；Slack 已接收但回應遺失時可能重送，無法保證跨系統恰好一次。 */
 async function deliverNotifications(db: ReturnType<typeof drizzle>, env: WaveEnv) {
-  if (!env.SLACK_API_TOKEN || !env.SLACK_CHANNEL_ID) return;
-  // 單輪發送量壓在 10 則：Slack 發送同樣計入 Worker 的 subrequest 額度，
-  // 必須與行情抓取共用預算；未送完的通知會保留在佇列，下一輪繼續補送。
-  const pending = await db.select().from(waveNotifications).where(isNull(waveNotifications.sentAt))
-    .orderBy(asc(waveNotifications.createdAt)).limit(10);
+  const channel = waveCryptoSlackChannel(env);
+  if (!env.SLACK_API_TOKEN || !channel) return;
+  const [newest] = await db.select({ createdAt: waveNotifications.createdAt }).from(waveNotifications)
+    .where(isNull(waveNotifications.sentAt)).orderBy(desc(waveNotifications.createdAt)).limit(1);
+  if (!newest) return;
+  // 4 小時訊號只在本根週期內重試；跨過下一根收盤後直接捨棄，不發歷史進場價。
+  if (Date.now() - newest.createdAt >= WAVE_INTERVAL_MS) {
+    await db.delete(waveNotifications).where(isNull(waveNotifications.sentAt));
+    return;
+  }
+  const latestBatchStart = Math.floor(newest.createdAt / WAVE_INTERVAL_MS) * WAVE_INTERVAL_MS;
+  await db.delete(waveNotifications).where(and(
+    isNull(waveNotifications.sentAt), lt(waveNotifications.createdAt, latestBatchStart),
+  ));
+  // 單輪最多三則且由最新偵測時間開始；限制 Slack 最差逾時，避免行情完成後仍被平台中止。
+  const pending = await db.select().from(waveNotifications).where(and(
+    isNull(waveNotifications.sentAt), gte(waveNotifications.createdAt, latestBatchStart),
+  )).orderBy(desc(waveNotifications.createdAt)).limit(MAX_NOTIFICATIONS_PER_RUN);
   for (const event of pending) {
     try {
+      const post = slackPostFromStored(event.message);
       const response = await fetch('https://slack.com/api/chat.postMessage', {
-        method: 'POST', signal: AbortSignal.timeout(10000),
+        method: 'POST', signal: AbortSignal.timeout(3000),
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${env.SLACK_API_TOKEN}` },
-        // 停機補送若已跨過一根 4h，必須突出標示歷史事件，避免把舊突破當成當前買點。
-        body: JSON.stringify({ channel: env.SLACK_CHANNEL_ID,
-          text: `${Date.now() - event.createdAt >= WAVE_INTERVAL_MS ? '*延遲補送：以下為歷史事件，不代表目前訊號*\n' : ''}${event.message}`,
-          mrkdwn: true }),
+        // 歷史列已先捨棄，Slack 只會收到目前 4 小時週期仍有效的觀察。
+        body: JSON.stringify({ channel, ...post, mrkdwn: true }),
       });
       const data = await response.json() as { ok?: boolean };
       // 遇到限流或失敗即結束本輪，保留待發事件，避免連續重試轟炸 Slack。
@@ -123,11 +143,11 @@ async function deliverNotifications(db: ReturnType<typeof drizzle>, env: WaveEnv
       await db.update(waveNotifications).set({ sentAt: Date.now() }).where(eq(waveNotifications.id, event.id));
     } catch { break; }
   }
-  // 僅清除已成功送達且超過 30 天的訊息，失敗紀錄保留供下一輪補送。
+  // 已送紀錄保留三十天；未送列最多只重試到目前 4 小時週期結束。
   await db.delete(waveNotifications).where(lt(waveNotifications.sentAt, Date.now() - 30 * 86400000));
 }
 
-export async function runWaveRadar(env: WaveEnv) {
+export async function runWaveRadar(env: WaveEnv, options: { notifications?: boolean } = {}) {
   if (env.WAVE_RADAR_ENABLED !== 'true') return;
   const db = drizzle(env.DB);
   const owner = crypto.randomUUID();
@@ -138,9 +158,12 @@ export async function runWaveRadar(env: WaveEnv) {
       .returning();
     if (!acquired.length) return;
     try {
-      await scanSymbols(db, owner);
+      /** 新頻道尚未設定時只保存行情，不先累積一批可能日後洗版的舊通知。 */
+      const notificationsReady = options.notifications !== false && Boolean(env.SLACK_API_TOKEN && waveCryptoSlackChannel(env));
+      await scanSymbols(db, owner, notificationsReady);
       const [lease] = await db.select().from(waveLease).where(eq(waveLease.id, 'scan'));
-      if (lease?.owner === owner && lease.expiresAt > Date.now() + 210000) await deliverNotifications(db, env);
+      /** 掃描結束仍持有有效租約即可送最新事件；短租約用來在異常中止後快速自癒。 */
+      if (notificationsReady && lease?.owner === owner && lease.expiresAt > Date.now()) await deliverNotifications(db, env);
     } finally {
       await db.delete(waveLease).where(and(eq(waveLease.id, 'scan'), eq(waveLease.owner, owner)));
     }

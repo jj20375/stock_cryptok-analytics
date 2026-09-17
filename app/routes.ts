@@ -1,3 +1,4 @@
+/** @file 集中註冊頁面與 API；雷達頁面的登入檢查由各 loader 負責。 */
 import { type RouteConfig, index, route } from "@react-router/dev/routes";
 
 export default [
@@ -18,9 +19,15 @@ export default [
   route("api/backtest", "routes/api.backtest.ts"),
   route("backtest", "routes/backtest.tsx"),
   route("api/warroom", "routes/api.warroom.ts"),
+  route("api/freqtrade/sync", "routes/api.freqtrade.sync.ts"),
+  route("api/freqtrade/research", "routes/api.freqtrade.research.ts"),
+  route("api/potential-radar/chart", "routes/api.potential-radar.chart.ts"),
   route("api/webhook/tradingview/:secret", "routes/api.webhook.tradingview.ts"),
   route("warroom", "routes/warroom.tsx"),
   route("wave-radar", "routes/wave-radar.tsx"),
+  route("potential-radar", "routes/potential-radar.tsx"),
+  route("us-stock-radar", "routes/us-stock-radar.tsx"),
+  route("tw-stock-radar", "routes/tw-stock-radar.tsx"),
   route("login", "routes/login.tsx"),
   route("register", "routes/register.tsx"),
   route("portfolio", "routes/portfolio.tsx"),

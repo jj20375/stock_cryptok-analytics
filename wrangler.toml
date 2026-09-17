@@ -10,6 +10,14 @@ enabled = true
 [vars]
 # 波段雷達只產生觀察與 Slack 通知；部署前須套用 0011 migration。
 WAVE_RADAR_ENABLED = "true"
+# 潛力幣雷達保存觀察，並在虛擬幣即時進場頻道設定齊全時通知新候選；絕不下單。
+POTENTIAL_RADAR_ENABLED = "true"
+# 永續雷達讀取 Gate 免費公開 Mark Price，通知只送虛擬幣即時進場頻道；絕不下單。
+BINANCE_PERP_RADAR_ENABLED = "true"
+# 美股雷達每 15 分鐘輕量檢查 Yahoo 1h 行情，只在新 4h／收盤段完成時全掃描。
+US_STOCK_RADAR_ENABLED = "true"
+# 台股雷達每 15 分鐘輕量檢查 0050，只在台股新 4h／收盤段完成時全掃描。
+TW_STOCK_RADAR_ENABLED = "true"
 # 機密變數已移至 .dev.vars，正式上線請透過 wrangler secret put 設定
 # GEMINI_API_KEY = ""
 # TWELVE_DATA_API_KEY = ""
@@ -18,6 +26,9 @@ WAVE_RADAR_ENABLED = "true"
 # TradingView Webhook 密鑰：wrangler secret put TRADINGVIEW_WEBHOOK_SECRET
 # （正式環境務必用不同於本機 .dev.vars 的隨機值，外洩即等同任何人都能推送假訊號）
 # TRADINGVIEW_WEBHOOK_SECRET = ""
+# 美股獨立 Slack 頻道：沿用 SLACK_API_TOKEN，僅需另設 wrangler secret put US_STOCK_SLACK_CHANNEL_ID
+# 台股即時進場價格頻道：沿用 SLACK_API_TOKEN，另設 wrangler secret put TW_STOCK_SLACK_CHANNEL_ID
+# 虛擬幣即時進場價格頻道：沿用 SLACK_API_TOKEN，另設 wrangler secret put CRYPTO_ENTRY_SLACK_CHANNEL_ID
 
 [[d1_databases]]
 binding = "DB"
@@ -30,9 +41,11 @@ migrations_dir = "drizzle"
 # - 14:00 台北 = 06:00 UTC
 # - 04:30 / 04:45 台北 = 20:30 / 20:45 UTC
 crons = [
-  "*/15 * * * *",
-  "0 6 * * *",
-  "15 6 * * *",
-  "30 20 * * *",
-  "45 20 * * *"
+  # 同一條 Cron 以分鐘錯開：+1 掃 Gate、+3 檢查美股、+4 檢查台股，仍只占一個 Cloudflare Trigger。
+  "1,3,4,16,18,19,31,33,34,46,48,49 * * * *",
+  "2,17,32,47 * * * *",
+  # 每五分鐘只消化一則 Gate Slack 佇列；Worker 內仍將策略與波段掃描限制為每 15 分鐘。
+  "*/5 * * * *",
+  "0,15 6 * * *",
+  "30,45 20 * * *"
 ]

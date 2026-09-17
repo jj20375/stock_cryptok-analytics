@@ -1,4 +1,4 @@
-/**
+/** @file 回測報告區分零成交與資料讀取失敗；只顯示已完成的計算結果。
  * 【詳細繁體中文註解】：回測績效報告 — KPI 卡片列
  * 沿用 dashboard 的黑白極簡卡片風格;正報酬紅色、負報酬綠色(與站內台股漲跌配色一致)。
  */
@@ -42,12 +42,12 @@ export function BacktestReport({ detail }: BacktestReportProps) {
     },
     {
       label: '勝率',
-      value: `${result.winRatePct}%`,
+      value: result.totalTrades ? `${result.winRatePct}%` : '—',
       hint: `${result.winTrades} 勝 / ${result.lossTrades} 敗`,
     },
     {
       label: 'Profit Factor',
-      value: result.profitFactor >= 9999 ? '∞' : `${result.profitFactor}`,
+      value: !result.totalTrades ? '—' : result.profitFactor >= 9999 ? '∞' : `${result.profitFactor}`,
       hint: '總獲利 ÷ 總虧損',
     },
     {
@@ -73,6 +73,10 @@ export function BacktestReport({ detail }: BacktestReportProps) {
   ];
 
   return (
+    <>
+    {result.totalTrades === 0 && <p role="status" className="terminal-status warn">
+      回測已完成，但此區間沒有成交，不能計算勝率。請先比較 90～180 天及不同幣種；更短的區間可能完全沒有符合條件的訊號。
+    </p>}
     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
       {kpis.map((kpi) => (
         <div
@@ -88,5 +92,6 @@ export function BacktestReport({ detail }: BacktestReportProps) {
         </div>
       ))}
     </div>
+    </>
   );
 }

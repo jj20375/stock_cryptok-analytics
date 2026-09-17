@@ -4,7 +4,8 @@ import { users, paperTrades } from "../db/schema";
 import { decryptData } from "../utils/encryption";
 import { getKlines } from "./binanceService";
 import { placeCryptoBuyOrder, placeCryptoSellOrder, getExchangeCryptoPrecision, type CryptoExchange } from "./cryptoOrderRouter";
-import { sendSlackMessage } from "./slackService";
+import { sendSlackMessage, sendSlackPost } from "./slackService";
+import { createUsStockDailyCard, type UsDailyMacro, type UsDailyStrategySection } from "./slack/usStockDailyCard";
 import { evaluateCryptoStrategy, fetchStockData, evaluateTrendMomentumData, evaluateConsecutiveVolumeData, evaluateVolumeNoBreakoutData } from "./stockService";
 import { getStrategy } from "./strategy/registry";
 import { IndicatorCache } from "./strategy/indicatorCache";
@@ -72,6 +73,11 @@ const DAILY_MODE_META: Record<DailyStrategyMode, {
 
 const resolveSlackChannel = (env: any) => {
   return env.SLACK_CHANNEL_ID || process.env.SLACK_CHANNEL_ID;
+};
+
+/** 虛擬幣進出場與 AI 訊號改走獨立頻道；不 fallback 到股市日報頻道。 */
+const resolveCryptoEntrySlackChannel = (env: any) => {
+  return env.CRYPTO_ENTRY_SLACK_CHANNEL_ID || process.env.CRYPTO_ENTRY_SLACK_CHANNEL_ID;
 };
 
 const formatTopCandidates = (candidates: DailyModeCandidate[], emptyText: string) => {
@@ -319,7 +325,7 @@ export const runStrategyEngine = async (env: any) => {
 
           // 取得 Slack 設定 (支援虛擬幣專用頻道分流)
           const slackToken = env.SLACK_API_TOKEN || process.env.SLACK_API_TOKEN;
-          const slackChannel = resolveSlackChannel(env);
+          const slackChannel = resolveCryptoEntrySlackChannel(env);
 
           if (!openTrade && isEntrySignal) {
             const cryptoRegime = await evaluateCryptoMarketRegime(symbol);
@@ -490,7 +496,7 @@ export const runStrategyEngine = async (env: any) => {
       'ADAUSDT', 'ZECUSDT', 'SUIUSDT', 'ASTRUSDT'
     ];
     const slackToken = env.SLACK_API_TOKEN || process.env.SLACK_API_TOKEN;
-    const slackChannel = resolveSlackChannel(env);
+    const slackChannel = resolveCryptoEntrySlackChannel(env);
 
     for (const symbol of cryptoSymbols) {
       const analysis = await evaluateCryptoStrategy(symbol, '4h');
@@ -620,11 +626,21 @@ export const runStockDailyStrategy = async (env: any, market: "TW" | "US" = "TW"
     const topGainers = [...symbols].sort((a, b) => b.changePercent - a.changePercent).slice(0, 5);
     const mostActive = [...symbols].sort((a, b) => b.volume - a.volume).slice(0, 5);
     let slackMsg = `*📅 ${marketLabel}${type === "market" ? "市場日報" : "AI 三模式策略日報"} (${dateStr})*\n`;
+    let macroCard: UsDailyMacro | null = null;
+    let strategyCardSections: UsDailyStrategySection[] = [];
 
     // 【詳細繁體中文註解】：引入全域總經債券參考風向球
     try {
       const macro = await getMacroIndicators();
       if (macro) {
+        macroCard = {
+          riskState: macro.regime.riskState,
+          reason: macro.regime.reason,
+          us10y: `${macro.us10y.value.toFixed(3)}% · ${macro.us10y.trend}`,
+          dxy: `${macro.dxy.value.toFixed(3)} · ${macro.dxy.trend}`,
+          vix: `${macro.vix.value.toFixed(2)} · ${macro.vix.trend}`,
+          yieldSpread: `${macro.spreads.yieldSpread10Y3M.toFixed(3)}%${macro.spreads.yieldSpread10Y3M < 0 ? " · 殖利率倒掛" : ""}`,
+        };
         slackMsg += `\n*🌍 全球總經債券風向球 (${macro.regime.riskState})*\n`;
         slackMsg += `> 美債 10Y 殖利率: *${macro.us10y.value.toFixed(3)}%* (10日均線: ${macro.us10y.ma10.toFixed(3)}% 趨勢: ${macro.us10y.trend})\n`;
         slackMsg += `> 美元指數 (DXY): *${macro.dxy.value.toFixed(3)}* (10日均線: ${macro.dxy.ma10.toFixed(3)} 趨勢: ${macro.dxy.trend})\n`;
@@ -656,6 +672,14 @@ export const runStockDailyStrategy = async (env: any, market: "TW" | "US" = "TW"
       const trendInsight = await buildModeInsight(env, marketLabel, "trend", modeBuckets.trend);
       const consecutiveInsight = await buildModeInsight(env, marketLabel, "consecutive_volume", modeBuckets.consecutive_volume);
       const volumeNoBreakInsight = await buildModeInsight(env, marketLabel, "volume_no_break", modeBuckets.volume_no_break);
+      strategyCardSections = [
+        { title: DAILY_MODE_META.trend.title, trendHint: DAILY_MODE_META.trend.trendHint,
+          insight: trendInsight, candidates: modeBuckets.trend },
+        { title: DAILY_MODE_META.consecutive_volume.title, trendHint: DAILY_MODE_META.consecutive_volume.trendHint,
+          insight: consecutiveInsight, candidates: modeBuckets.consecutive_volume },
+        { title: DAILY_MODE_META.volume_no_break.title, trendHint: DAILY_MODE_META.volume_no_break.trendHint,
+          insight: volumeNoBreakInsight, candidates: modeBuckets.volume_no_break },
+      ];
 
       slackMsg += `\n*1) 盤面概覽*\n`;
       slackMsg += `> 漲幅領先：*${topGainers[0]?.name || "N/A"}* (${topGainers[0]?.symbol || "-"})\n`;
@@ -679,7 +703,14 @@ export const runStockDailyStrategy = async (env: any, market: "TW" | "US" = "TW"
 
     if (slackMsg) {
       slackMsg += `\n_💡 投資有風險，僅供參考。_`;
-      await sendSlackMessage(slackToken, slackChannel, slackMsg);
+      if (market === "US") {
+        /** 美股日報以 Block Kit 分區顯示；fallback text 保留手機推播摘要，發送目的地仍是原股票日報頻道。 */
+        await sendSlackPost(slackToken, slackChannel, createUsStockDailyCard({
+          date: dateStr, type, topGainers, mostActive, macro: macroCard, strategySections,
+        }));
+      } else {
+        await sendSlackMessage(slackToken, slackChannel, slackMsg);
+      }
     }
   } catch (error) {
     console.error(`🔥 [runStockDailyStrategy] ${market} 執行失敗:`, error);

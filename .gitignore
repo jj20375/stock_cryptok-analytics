@@ -13,5 +13,14 @@ coverage/
 *.sqlite
 *.sqlite3
 
+# Freqtrade 的本機行情、模擬交易資料庫與含帳密設定不可提交。
+freqtrade/user_data/data/
+freqtrade/user_data/logs/
+freqtrade/user_data/*.sqlite
+freqtrade/user_data/config*.local.json
+freqtrade/**/__pycache__/
+freqtrade/user_data/backtest_results/
+freqtrade/user_data/*.sqlite-*
+
 # Drizzle ORM
 .drizzle/

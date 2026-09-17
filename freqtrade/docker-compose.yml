@@ -1,0 +1,34 @@
+services:
+  freqtrade:
+    # 固定官方版本，避免 stable 自動升級後無法重現結果。
+    image: freqtradeorg/freqtrade:2026.8
+    restart: unless-stopped
+    volumes:
+      - ./user_data:/freqtrade/user_data
+    ports:
+      - "127.0.0.1:8080:8080"
+    command: trade --config /freqtrade/user_data/config.dryrun.local.json --strategy WaveRadar15mStrategy --dry-run
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/api/v1/ping', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 120s
+  sync:
+    image: freqtradeorg/freqtrade:2026.8
+    restart: unless-stopped
+    # 啟動此 profile 才向網站送摘要，平常可只跑本機模擬。
+    profiles: ["sync"]
+    depends_on:
+      freqtrade:
+        condition: service_healthy
+    volumes:
+      - ./user_data/scripts:/freqtrade/user_data/scripts:ro
+      - ./user_data/config.dryrun.local.json:/freqtrade/user_data/config.dryrun.local.json:ro
+      - ./user_data/config.sync.local.json:/freqtrade/user_data/config.sync.local.json:ro
+    environment:
+      FREQTRADE_API_URL: http://freqtrade:8080
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    entrypoint: ["python", "/freqtrade/user_data/scripts/sync_to_dashboard.py"]
+    command: ["--loop"]

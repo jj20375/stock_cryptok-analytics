@@ -1,166 +1,63 @@
-/**
- * 【詳細繁體中文註解】：戰情室 — 加密貨幣永續合約即時訊號看板
- *
- * 定位:比回測系統更直接的「現在該怎麼做」看板,不需要理解回測參數,
- * 打開頁面就能看到:大盤風險燈號、每檔幣種目前訊號(做多/做空/觀望)、
- * 依自訂保證金與槓桿試算的倉位與估算爆倉價、建議停損與離場時機。
- *
- * ⚠️ 純顯示看板,不會替使用者下單 — 所有交易仍需自行到交易所操作。
- * 訊號僅供技術面參考,不構成投資建議,合約交易伴隨爆倉風險,請謹慎評估。
- */
-
+/** @component 戰情室整合行情、訊號與獨立模擬研究；登入後只讀，不觸發交易。 */
 import { useState } from 'react';
 import { redirect, type LoaderFunctionArgs } from 'react-router';
-import { AlertTriangle, RefreshCw, Shield } from 'lucide-react';
 import { AppLayout } from '../components/AppLayout';
 import { getUserId } from '../utils/auth';
 import { useWarRoom } from '../features/warroom/useWarRoom';
 import { CoinSignalCard } from '../features/warroom/components/CoinSignalCard';
-import { cn } from '../utils/cn';
+import { TerminalNav, TerminalStat, SignalDistribution, tradingPct, tradingTime } from '../features/tradingDashboard/components';
+import { ResearchPanel } from '../features/tradingDashboard/ResearchPanel';
 
 export async function loader({ request, context }: LoaderFunctionArgs) {
-  const env = (context as any).cloudflare.env;
-  const userId = await getUserId(request, env);
-  if (!userId) throw redirect('/login');
-  return { userId };
+  if (!await getUserId(request, (context as any).cloudflare.env)) throw redirect('/login');
+  return null;
 }
-
-const REGIME_STYLE: Record<string, { label: string; className: string }> = {
-  LOW: { label: '風險偏低', className: 'bg-emerald-500 text-white' },
-  MEDIUM: { label: '風險中等,建議壓低倉位', className: 'bg-amber-500 text-white' },
-  HIGH: { label: '風險偏高,建議觀望', className: 'bg-rose-500 text-white' },
-  CRASH: { label: '市場熔斷警戒', className: 'bg-rose-700 text-white animate-pulse' },
-};
+const RISK_LABELS: Record<string, string> = { LOW: '風險偏低', MEDIUM: '風險中等', HIGH: '風險偏高', CRASH: '熔斷警戒' };
 
 export default function WarRoomPage() {
+  /** 週期會重新查詢，金額與槓桿只影響本機試算，不會送出訂單。 */
   const [interval, setInterval] = useState('4h');
   const [marginUsdt, setMarginUsdt] = useState(100);
   const [leverage, setLeverage] = useState(3);
+  const [filter, setFilter] = useState('ALL');
   const { data, loading, error, refresh } = useWarRoom(interval);
-
-  const regimeStyle = data ? REGIME_STYLE[data.marketRegime.riskLevel] : null;
-
-  // 排序:有明確訊號(LONG/SHORT)的排最前面,方便一眼看到「現在可以開哪個合約」
-  const sortedCoins = data
-    ? [...data.coins].sort((a, b) => {
-        const rank = (c: typeof a) => (c.error ? 2 : c.signal === 'HOLD' || !c.signal ? 1 : 0);
-        return rank(a) - rank(b);
-      })
-    : [];
-
-  return (
-    <AppLayout>
-      <div className="p-4 md:p-6 flex flex-col gap-4 max-w-[1400px] mx-auto">
-        <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[#141414] pb-3">
-          <div className="flex items-center gap-3">
-            <Shield size={22} />
-            <div>
-              <h1 className="text-xl font-bold font-serif leading-none">戰情室</h1>
-              <p className="text-[11px] font-mono opacity-50 mt-1">
-                即時合約訊號看板 — 只看不下單,實際交易請自行至交易所操作
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            {data && (
-              <span className="text-[10px] font-mono opacity-40">
-                更新於 {new Date(data.updatedAt).toLocaleTimeString('zh-TW')}(每 60 秒自動刷新)
-              </span>
-            )}
-            <button
-              onClick={refresh}
-              disabled={loading}
-              className="flex items-center gap-1 px-3 py-1.5 text-xs font-mono font-bold border border-[#141414] rounded-sm hover:bg-[#141414] hover:text-[#E4E3E0] disabled:opacity-50 transition-colors"
-            >
-              <RefreshCw size={12} className={cn(loading && 'animate-spin')} />
-              刷新
-            </button>
-          </div>
-        </header>
-
-        {/* 大盤風控燈號 */}
-        {regimeStyle && data && (
-          <div className={cn('p-3 rounded-sm flex items-center gap-2 text-xs font-mono font-bold', regimeStyle.className)}>
-            <AlertTriangle size={14} />
-            大盤狀態(BTC):{regimeStyle.label} — {data.marketRegime.reason}
-          </div>
-        )}
-
-        {error && (
-          <div className="p-3 bg-rose-50 border border-rose-400 rounded-sm text-xs font-mono text-rose-600">
-            載入失敗:{error}
-          </div>
-        )}
-
-        {/* 控制列 */}
-        <div className="bg-white/80 border border-[#141414] rounded-sm p-4 flex flex-wrap items-end gap-4">
-          <div className="flex flex-col gap-1">
-            <span className="text-[10px] font-mono font-bold uppercase opacity-50">K 線週期</span>
-            <div className="flex gap-1">
-              {['1h', '4h', '1d'].map((opt) => (
-                <button
-                  key={opt}
-                  onClick={() => setInterval(opt)}
-                  className={cn(
-                    'px-3 py-1.5 text-xs font-mono border border-[#141414] rounded-sm transition-all',
-                    interval === opt ? 'bg-[#141414] text-[#E4E3E0]' : 'hover:bg-[#141414]/5'
-                  )}
-                >
-                  {opt.toUpperCase()}
-                </button>
-              ))}
-            </div>
-          </div>
-          <label className="flex flex-col gap-1">
-            <span className="text-[10px] font-mono font-bold uppercase opacity-50">投入保證金(USDT)</span>
-            <input
-              type="number"
-              min={1}
-              step={10}
-              value={marginUsdt}
-              onChange={(e) => setMarginUsdt(Math.max(1, Number(e.target.value)))}
-              className="w-32 border border-[#141414] bg-white px-2 py-1.5 text-xs font-mono rounded-sm focus:outline-none"
-            />
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-[10px] font-mono font-bold uppercase opacity-50">槓桿倍數</span>
-            <input
-              type="number"
-              min={1}
-              max={125}
-              step={1}
-              value={leverage}
-              onChange={(e) => setLeverage(Math.min(125, Math.max(1, Number(e.target.value))))}
-              className="w-24 border border-[#141414] bg-white px-2 py-1.5 text-xs font-mono rounded-sm focus:outline-none"
-            />
-          </label>
-          {data && <span className="text-[10px] font-mono opacity-40">訊號策略:{data.strategyName}</span>}
-        </div>
-
-        {/* 幣種訊號卡片 */}
-        {loading && !data ? (
-          <div className="p-12 flex items-center justify-center gap-2 text-xs font-mono opacity-50">
-            <RefreshCw size={14} className="animate-spin" />
-            載入中...
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {sortedCoins.map((coin) => (
-              // 【詳細繁體中文註解】：key 刻意放在原生 div 上而非自訂元件 —
-              // 專案未安裝 @types/react,自訂元件的 key prop 型別檢查會失敗(原生元素不受影響)。
-              <div key={coin.symbol}>
-                <CoinSignalCard coin={coin} marginUsdt={marginUsdt} leverage={leverage} />
-              </div>
-            ))}
-          </div>
-        )}
-
-        <p className="text-[10px] leading-relaxed opacity-40">
-          ⚠️ 爆倉價為簡化估算(逐倉模式、固定維持保證金率),實際數值請以交易所當下顯示為準;
-          訊號僅依歷史技術指標產生,不保證未來獲利,合約交易具槓桿放大效果與爆倉風險,請自行評估承受能力。
-          本頁面不構成投資建議,亦不會代為執行任何交易。
-        </p>
-      </div>
-    </AppLayout>
-  );
+  const coins = data?.coins ?? [];
+  const healthy = coins.filter(coin => !coin.error && coin.signal != null);
+  const longs = healthy.filter(c => c.signal === 'LONG').length;
+  const shorts = healthy.filter(c => c.signal === 'SHORT').length;
+  const unavailable = coins.length - healthy.length;
+  const sorted = [...coins].filter(c => filter === 'ALL' || c.signal === filter).sort((a, b) =>
+    Number(!!a.error) - Number(!!b.error) || Number(a.signal === 'HOLD') - Number(b.signal === 'HOLD'));
+  return <AppLayout><div className="trading-dashboard">
+    <header className="terminal-header"><div><p className="terminal-eyebrow">MARKET INTELLIGENCE / 01</p><h1>戰情室</h1><p className="terminal-subtitle">掌握市場方向，讓訊號、風險與研究結果同時可見。</p></div>
+      <div className="flex items-center gap-3"><span className={`terminal-status ${error ? 'error' : 'warn'}`}>{error ? '行情讀取異常' : loading ? '行情更新中' : '觀察模式'}</span>
+        <button className="terminal-button" disabled={loading} onClick={refresh}>更新行情</button></div></header>
+    <TerminalNav current="warroom" />
+    <section className="terminal-stats" aria-label="行情摘要">
+      <TerminalStat label="BTC 大盤風險" value={data ? RISK_LABELS[data.marketRegime.riskLevel] : '—'} note={data?.marketRegime.reason ?? '等待行情評估'} tone="terminal-warn" />
+      <TerminalStat label="偏多訊號" value={data ? longs : '—'} note="現貨技術指標參考" tone="terminal-up" />
+      <TerminalStat label="偏空訊號" value={data ? shorts : '—'} note="方向參考，無自動下單" tone="terminal-down" />
+      <TerminalStat label="有效行情" value={data ? `${healthy.length} / ${coins.length}` : '—'} note={data ? `更新 ${tradingTime(data.updatedAt)} · 台北` : '每 60 秒更新'} />
+    </section>
+    {error && <p role="alert" className="terminal-status error mb-4">{error}</p>}
+    <div className="terminal-grid">
+      <section className="terminal-panel"><div className="terminal-panel-heading"><h2>市場熱區</h2><span>{interval} 單根已收盤漲跌</span></div><div className="terminal-heatmap">
+        {coins.map(c => <a key={c.symbol} href={`#coin-${c.symbol}`} className="terminal-tile" data-tone={c.error ? 'warn' : (c.changePct ?? 0) >= 0 ? 'up' : 'down'} onClick={() => setFilter('ALL')}><strong>{c.symbol.replace('USDT', '')}</strong><span>{c.error ? '待更新' : tradingPct(c.changePct)}</span></a>)}
+        {!coins.length && <p className="terminal-empty">{loading ? '行情載入中…' : '暫無可用行情'}</p>}
+      </div></section>
+      <section className="terminal-panel"><div className="terminal-panel-heading"><h2>訊號分布</h2><span>Supertrend 動能</span></div><SignalDistribution segments={[
+        { label: '偏多', count: longs, color: '#75e3ba' }, { label: '偏空', count: shorts, color: '#ff91a5' },
+        { label: '觀望', count: healthy.length - longs - shorts, color: '#738cad' }, { label: '資料異常', count: unavailable, color: '#f3c578' },
+      ]} /></section>
+    </div>
+    <ResearchPanel />
+    <div className="terminal-toolbar"><div className="flex flex-wrap gap-3">
+      <label className="terminal-muted">K 線週期 <select className="terminal-input" value={interval} onChange={e => setInterval(e.target.value)}>{['1h', '4h', '1d'].map(v => <option key={v}>{v}</option>)}</select></label>
+      <label className="terminal-muted">訊號 <select className="terminal-input" value={filter} onChange={e => setFilter(e.target.value)}><option value="ALL">全部</option><option value="LONG">偏多</option><option value="SHORT">偏空</option><option value="HOLD">觀望</option></select></label>
+    </div><div className="flex flex-wrap gap-3"><label className="terminal-muted">試算保證金 USDT <input className="terminal-input w-24" type="number" min="1" max="1000000" value={marginUsdt} onChange={e => setMarginUsdt(Math.min(1_000_000, Math.max(1, Number(e.target.value) || 1)))} /></label>
+      <label className="terminal-muted">槓桿 <input className="terminal-input w-20" type="number" min="1" max="125" value={leverage} onChange={e => setLeverage(Math.min(125, Math.max(1, Number(e.target.value) || 1)))} /></label></div></div>
+    <div className="terminal-cards">{sorted.map(coin => <div key={coin.symbol}><CoinSignalCard coin={coin} marginUsdt={marginUsdt} leverage={leverage} /></div>)}
+      {!sorted.length && <p className="terminal-empty">{loading ? '正在載入訊號…' : '目前沒有符合條件的標的'}</p>}</div>
+    <p className="terminal-footer">訊號來自已收盤現貨行情，資金費率另取 Binance 永續。合約爆倉價是簡化逐倉試算，實際金額以交易所為準。策略尚須歷史及樣本外驗證，本頁不執行下單。</p>
+  </div></AppLayout>;
 }

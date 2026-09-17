@@ -82,13 +82,15 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
 
     const intervalMs = intervalToMs(interval);
     const now = Date.now();
+    /** 訊號只能使用所選週期的最新收盤；資料缺口交由既有行情服務切換備援。 */
+    const lastClosedOpen = Math.floor(now / intervalMs) * intervalMs - intervalMs;
     // 抓最近 100 根(對應原本 getKlines 的 limit=100),足夠 supertrend_momentum 的暖機需求
     const startTime = now - 100 * intervalMs;
 
     const coinResults = await mapWithConcurrencyLimit(WARROOM_SYMBOLS, BATCH_SIZE, async (coin) => {
       try {
         const [klineResult, funding] = await Promise.all([
-          fetchBinanceRange(coin.symbol, interval, startTime, now, 1),
+          fetchBinanceRange(coin.symbol, interval, startTime, now, 1, { minLatestOpenTime: lastClosedOpen, requireContiguous: true }),
           fetchFundingRate(coin.symbol),
         ]);
 
@@ -124,6 +126,10 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
           symbol: coin.symbol,
           name: coin.name,
           price: currentPrice,
+          source: klineResult.source,
+          barTime: candles[evalIndex].openTime,
+          changePct: (currentPrice / candles[evalIndex - 1].close - 1) * 100,
+          closes: candles.slice(-24).map(candle => candle.close),
           signal,
           reason: action.type === 'ENTRY' ? action.reason : '目前訊號不明確,建議觀望',
           stopLossPct,

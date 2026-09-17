@@ -87,7 +87,8 @@ const fetchOnePage = async (
   symbol: string,
   interval: string,
   startTime: number,
-  endTime: number
+  endTime: number,
+  requestTimeoutMs: number
 ): Promise<Candle[]> => {
   if (source === 'GATE_SPOT') {
     // Gate.io 時間單位為「秒」,且欄位順序為 [時間, 計價幣成交額, 收, 高, 低, 開, 基礎幣成交量, 是否已收盤]
@@ -96,9 +97,8 @@ const fetchOnePage = async (
       interval,
       from: String(Math.floor(startTime / 1000)),
       to: String(Math.floor(endTime / 1000)),
-      limit: String(PAGE_LIMIT),
     });
-    const response = await fetch(`${GATE_KLINE_URL}?${query}`, { signal: AbortSignal.timeout(6000) });
+    const response = await fetch(`${GATE_KLINE_URL}?${query}`, { signal: AbortSignal.timeout(requestTimeoutMs) });
     if (!response.ok) throw new Error(`GATE_SPOT 歷史行情回應異常: ${response.status} ${response.statusText}`);
     const payload = await response.json() as any;
     if (!Array.isArray(payload)) throw new Error('GATE_SPOT 歷史行情格式不正確');
@@ -120,7 +120,7 @@ const fetchOnePage = async (
     ? new URLSearchParams({ category: 'spot', symbol, interval: toBybitInterval(interval), start: String(startTime), end: String(endTime), limit: String(PAGE_LIMIT) })
     : new URLSearchParams({ symbol, interval, startTime: String(startTime), endTime: String(endTime), limit: String(PAGE_LIMIT) });
   const url = `${source === 'BYBIT_SPOT' ? BYBIT_KLINE_URL : BINANCE_US_KLINE_URL}?${query}`;
-  const response = await fetch(url, { signal: AbortSignal.timeout(6000) });
+  const response = await fetch(url, { signal: AbortSignal.timeout(requestTimeoutMs) });
   if (!response.ok) throw new Error(`${source} 歷史行情回應異常: ${response.status} ${response.statusText}`);
   const payload = await response.json() as any;
   if (source === 'BYBIT_SPOT') {
@@ -167,6 +167,8 @@ export interface FetchRangeOptions {
    * 回測抓長區間時交易所早期可能真有停機缺口,故預設關閉,只有即時掃描才啟用。
    */
   requireContiguous?: boolean;
+  /** 即時排程可縮短逾時以確保租約能正常釋放；歷史回測省略時仍使用六秒。 */
+  requestTimeoutMs?: number;
 }
 
 /** 以單一來源抓取整個區間(不做備援切換),供 fetchBinanceRange 逐一嘗試各來源。 */
@@ -177,7 +179,8 @@ const fetchRangeWithSource = async (
   startTime: number,
   endTime: number,
   maxPages: number,
-  intervalMs: number
+  intervalMs: number,
+  requestTimeoutMs: number
 ): Promise<{ candles: Candle[]; complete: boolean; nextCursor: number | null }> => {
   const candles: Candle[] = [];
   let cursor = startTime;
@@ -185,24 +188,22 @@ const fetchRangeWithSource = async (
   for (let page = 0; page < maxPages; page++) {
     if (cursor > endTime) break;
 
-    const pageData = await fetchOnePage(source, symbol, interval, cursor, endTime);
+    /** 每頁固定最多 1000 個時間格；Bybit 從區間尾端回傳，未限縮 end 會漏掉前段歷史。
+     * Gate 也限制區間最多 1000 根，且 from/to 不能與 limit 同送。 */
+    const pageEnd = Math.min(endTime, cursor + PAGE_LIMIT * intervalMs - 1);
+    const pageData = await fetchOnePage(source, symbol, interval, cursor, pageEnd, requestTimeoutMs);
     // 空頁代表該區間已無資料(例如標的上市日之前),視為抓取完成 —
     // 若不這樣處理,呼叫端會拿到永遠補不完的游標而無限輪詢
     if (pageData.length === 0) {
-      cursor = endTime + 1;
-      break;
+      cursor = pageEnd + 1;
+      continue;
     }
 
     candles.push(...pageData);
     const lastOpenTime = pageData[pageData.length - 1].openTime;
 
-    // 不足一整頁代表區間內資料已抓完
-    if (pageData.length < PAGE_LIMIT) {
-      cursor = endTime + 1;
-      break;
-    }
-    // 游標推進到最後一根的下一根,避免重複抓取
-    cursor = lastOpenTime + intervalMs;
+    /** 稀疏或上市前的頁面仍推進至下一個時間窗，不能誤判整段歷史已完成。 */
+    cursor = Math.max(pageEnd + 1, lastOpenTime + intervalMs);
   }
 
   // 過濾掉尚未收盤的 K 線(openTime + intervalMs > 現在時間 代表還在走)
@@ -237,11 +238,12 @@ export const fetchBinanceRange = async (
 ): Promise<FetchRangeResult> => {
   const intervalMs = intervalToMs(interval);
   const sources = options.forcedSource ? [options.forcedSource] : getCryptoKlineSources(symbol);
+  const requestTimeoutMs = options.requestTimeoutMs ?? 6000;
 
   let lastError: unknown = null;
   for (const source of sources) {
     try {
-      const result = await fetchRangeWithSource(source, symbol, interval, startTime, endTime, maxPages, intervalMs);
+      const result = await fetchRangeWithSource(source, symbol, interval, startTime, endTime, maxPages, intervalMs, requestTimeoutMs);
 
       // 資料過期(該來源該幣流動性不足或延遲)時改用下一個來源,而不是讓整檔停擺
       if (options.minLatestOpenTime != null) {

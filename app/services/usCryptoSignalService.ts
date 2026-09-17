@@ -5,7 +5,7 @@
  * 系統不代為下單,只在收盤後掃描觀察清單,對出現進場訊號的標的推播 Slack,
  * 內含建議倉位(重用 positionSizing 風險式計算)與停損價,由使用者自行決定是否手動下單。
  *
- * 排程:由 worker.ts 掛在既有美股策略日報 cron(45 20 * * * UTC = 台北 04:45,美股已收盤)。
+ * 排程:由 worker.ts 的合併美股日報 cron 在 UTC 20:45（台北 04:45）分流執行。
  *
  * 策略來源:與回測共用同一份 strategy registry(rsiMeanReversion / supertrendMomentum),
  * 以「最後一根已收盤日 K」評估 — 與回測引擎的判定邏輯完全一致,

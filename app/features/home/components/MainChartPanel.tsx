@@ -213,7 +213,8 @@ export function MainChartPanel({
         />
       </div>
 
-      <section className="border border-[#141414] p-3 md:p-4 bg-white min-h-[850px] md:min-h-[700px] h-[90vh] md:h-[85vh] max-h-[1200px] rounded-sm relative flex flex-col overflow-hidden">
+      {/* 圖表容器提高總高度，並在 home.tsx 將多出的空間優先分給主 K 線窗格。 */}
+      <section className="border border-[#141414] p-3 md:p-4 bg-white min-h-[980px] md:min-h-[820px] h-[94vh] md:h-[92vh] max-h-[1500px] rounded-sm relative flex flex-col overflow-hidden">
         {isAiAnalyzing && (
           <div className="absolute inset-0 z-50 bg-[#141414]/80 backdrop-blur-sm flex flex-col items-center justify-center text-white p-8 text-center">
             <div className="relative mb-6">

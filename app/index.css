@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./features/tradingDashboard/dashboard.css";
 
 @layer utilities {
   .custom-scrollbar::-webkit-scrollbar {

@@ -25,8 +25,8 @@ import { validateWaveCandles } from '../waveRadar/state';
 type D1Db = ReturnType<typeof drizzle>;
 
 // 單次 prepare 呼叫最多抓的頁數(每頁 1000 根)。
-// 控制 Workers subrequest 用量:40 頁 + D1 batch 寫入仍在安全範圍內。
-const MAX_PAGES_PER_INVOCATION = 40;
+// 每趟至多 4000 根，為備援請求與 D1 分批寫入留餘裕，剩餘資料由前端續跑。
+const MAX_PAGES_PER_INVOCATION = 4;
 
 // 一年毫秒數(加密貨幣 24h 全年無休的年化基準)
 const YEAR_MS = 365 * 24 * 60 * 60 * 1000;
@@ -92,7 +92,10 @@ export const prepareBacktestData = async (db: D1Db, backtestId: number): Promise
     const intervalMs = intervalToMs(row.interval);
     const fetchStart = row.startTime - warmupPadMs(strategy.warmupBars, intervalMs);
     // 終點不可超過現在(未來的 K 線不存在)
-    const fetchEnd = Math.min(row.endTime, Date.now());
+    /** 加密市場僅補到最新已收盤格，避免每次輪詢都重新要求仍未收盤的尾端。 */
+    const fetchEnd = market === 'CRYPTO'
+      ? Math.min(row.endTime, Math.floor(Date.now() / intervalMs) * intervalMs - 1)
+      : Math.min(row.endTime, Date.now());
 
     if (market === 'US' || market === 'TW') {
       // 美股/台股:一次抓 5 年日線(單一 HTTP 請求),INSERT OR IGNORE 冪等寫入

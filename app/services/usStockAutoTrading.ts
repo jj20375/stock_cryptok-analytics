@@ -21,7 +21,7 @@
  * 自動略過不套用)與 positionSizing.calculateRiskBasedPosition,风控統計僅計入 market='US' 的交易,
  * 與加密貨幣交易分開計算每日虧損/交易次數上限,避免兩邊互相排擠額度。
  *
- * 排程:由 worker.ts 掛在既有美股策略日報 cron(45 20 * * * UTC),與 usCryptoSignalService
+ * 排程:由 worker.ts 的合併美股日報 cron 在 UTC 20:45 分流，與 usCryptoSignalService
  * 各自獨立 waitUntil,互不影響。
  */
 

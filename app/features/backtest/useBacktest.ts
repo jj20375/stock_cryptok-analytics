@@ -21,7 +21,7 @@ import type {
 } from './types';
 import { getSymbolsByMarket } from './constants';
 
-// prepare 輪詢上限:2 年 15m 約 7 萬根,每趟最多 4 萬根,理論 2~3 趟即完成;30 趟是絕對安全上限
+/** prepare 每趟最多 4000 根，2 年 15m 約 7 萬根需約 18 趟；30 趟保留暖機及缺口重試餘裕。 */
 const MAX_PREPARE_POLLS = 30;
 
 const postJson = async (body: unknown) => {

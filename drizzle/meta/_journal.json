@@ -85,6 +85,20 @@
       "when": 1788759567895,
       "tag": "0011_wave_radar",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1788912000000,
+      "tag": "0012_potential_radar",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1788998400000,
+      "tag": "0013_freqtrade_pilot",
+      "breakpoints": true
     }
   ]
 }

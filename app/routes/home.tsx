@@ -661,7 +661,8 @@ export default function App() {
       const manageSubPane = (name: string, show: boolean, paneId: string) => {
         if (show) {
           chart.createIndicator(name, false, { id: paneId });
-          chart.setPaneOptions({ id: paneId, height: 100, minHeight: 60 });
+          // 副圖維持可讀但縮小固定高度，避免 MACD／RSI／KDJ 同時開啟時擠壓主 K 線。
+          chart.setPaneOptions({ id: paneId, height: 88, minHeight: 56 });
         } else {
           chart.removeIndicator(paneId, name);
         }
@@ -671,7 +672,8 @@ export default function App() {
       manageSubPane('MACD', showIndicators.macd, 'pane_macd');
       manageSubPane('RSI', showIndicators.rsi, 'pane_rsi');
       manageSubPane('KDJ', showIndicators.kd, 'pane_kdj');
-      chart.setPaneOptions({ id: 'main', minHeight: 250 });
+      // 主窗格至少保留 380px；容器增加的高度會自然優先留給 K 線與均線。
+      chart.setPaneOptions({ id: 'main', height: 460, minHeight: 380 });
 
       setTimeout(() => chart.resize(), 10);
       setTimeout(() => chart.resize(), 100);

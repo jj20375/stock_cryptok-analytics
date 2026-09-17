@@ -1,6 +1,12 @@
+/** @file 資料表彙整；匯出交易資料及獨立的公開行情觀察資料，供 migration 使用。 */
 import { sqliteTable, text, integer, real, uniqueIndex, index } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
 export { waveRadar, waveNotifications, waveLease } from './waveSchema';
+export { potentialRadar, potentialObservations, potentialRun, potentialRadarNotifications } from './potentialSchema';
+export { freqtradeRuns } from './freqtradeSchema';
+export { binancePerpRun, binancePerpAlerts } from './binancePerpSchema';
+export { usStockRadar, usStockObservations, usStockRadarRun, usStockRadarNotifications } from './usStockRadarSchema';
+export { twStockRadar, twStockObservations, twStockRadarRun, twStockRadarNotifications } from './twStockRadarSchema';
 
 // 【詳細繁體中文註解】：使用者資料表
 export const users = sqliteTable('users', {

@@ -1,39 +1,24 @@
-import React, { useState, useMemo, useEffect } from "react";
-import { type LoaderFunctionArgs, useLoaderData, useNavigate } from "react-router";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { type LoaderFunctionArgs, useLoaderData } from "react-router";
 import { 
   TrendingUp, 
   TrendingDown, 
   DollarSign, 
-  PieChart as PieChartIcon, 
   Plus, 
   Search, 
   Trash2, 
   Edit3, 
   Save, 
   X,
-  ArrowUpRight,
-  ChevronRight,
   BarChart3,
-  List,
-  Filter,
   Globe,
   Bitcoin,
   LayoutGrid,
   Check
 } from "lucide-react";
-import { 
-  PieChart, 
-  Pie, 
-  Cell, 
-  ResponsiveContainer, 
-  Tooltip, 
-  BarChart, 
-  Bar, 
-  XAxis, 
-  YAxis,
-  CartesianGrid
-} from "recharts";
 import { AppLayout } from "../components/AppLayout";
+import { PortfolioAdvicePanel } from '../features/portfolio/PortfolioAdvicePanel';
+import { PortfolioOverview } from '../features/portfolio/PortfolioOverview';
 import { getSession } from "../utils/auth";
 import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
@@ -230,9 +215,7 @@ export default function PortfolioPage() {
       .sort((a, b) => b.pnl - a.pnl);
   }, [portfolio]);
 
-  const COLORS = ['#141414', '#4F46E5', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899'];
-
-  const handleAddAsset = async (e: React.FormEvent) => {
+  const handleAddAsset = async (e: FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     try {
@@ -342,211 +325,13 @@ export default function PortfolioPage() {
   return (
     <AppLayout>
       <div className="max-w-7xl mx-auto p-4 md:p-8 space-y-8 pb-20">
-        {/* Header Section */}
-        <header className="flex flex-col md:flex-row md:items-end justify-between gap-6 border-b border-[#141414] pb-8">
-          <div className="space-y-2">
-            <div className="flex items-center gap-2">
-               <div className="px-2 py-0.5 bg-[#141414] text-white text-[9px] font-mono tracking-tighter uppercase rounded-sm">Asset Management</div>
-            </div>
-            <h1 className="font-serif italic text-4xl md:text-6xl tracking-tight">持股績效總覽</h1>
-          </div>
-          <div className="flex gap-8">
-             <div className="text-right group">
-                <div className="text-[10px] font-mono uppercase opacity-40 group-hover:opacity-100 transition-opacity">Total Net Value</div>
-                <div className="text-3xl font-mono font-bold tracking-tighter">
-                  ${stats.totalValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                </div>
-             </div>
-             <div className="h-12 w-px bg-[#141414]/10" />
-             <div className="text-right group">
-                <div className="text-[10px] font-mono uppercase opacity-40 group-hover:opacity-100 transition-opacity">Overall P/L</div>
-                <div className={cn(
-                  "text-3xl font-mono font-bold tracking-tighter flex items-baseline justify-end gap-2",
-                  stats.totalPnL >= 0 ? "text-emerald-600" : "text-rose-600"
-                )}>
-                  <span>{stats.totalPnL >= 0 ? "+" : ""}{stats.totalPnL.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
-                  <span className="text-sm font-bold opacity-80">({stats.totalROI >= 0 ? "+" : ""}{stats.totalROI.toFixed(2)}%)</span>
-                </div>
-             </div>
-          </div>
-        </header>
-
-        {/* Dashboard Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Performance Stats Card */}
-          <div className="border border-[#141414] p-8 bg-white flex flex-col justify-between relative overflow-hidden group">
-            <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
-               <TrendingUp size={80} />
-            </div>
-            <div className="relative z-10">
-              <div className="flex items-center justify-between mb-6">
-                <span className="text-xs font-mono uppercase font-bold tracking-widest opacity-40">Portfolio Return</span>
-                <span className={cn(
-                  "text-xs font-mono font-bold px-2 py-0.5 rounded-full",
-                  stats.totalROI >= 0 ? "bg-emerald-50 text-emerald-600" : "bg-rose-50 text-rose-600"
-                )}>
-                  {stats.totalROI >= 0 ? "PROFIT" : "LOSS"}
-                </span>
-              </div>
-              <div className="text-6xl font-mono font-bold tracking-tighter mb-4">
-                {stats.totalROI.toFixed(2)}<span className="text-2xl ml-1">%</span>
-              </div>
-              <div className="space-y-3">
-                <div className="flex items-center justify-between text-[10px] font-mono">
-                   <span className="opacity-40 uppercase">Win Rate Probability</span>
-                   <span className="font-bold">{stats.winRate.toFixed(1)}%</span>
-                </div>
-                <div className="h-1.5 w-full bg-[#141414]/5 rounded-full overflow-hidden">
-                  <div 
-                    className="h-full bg-[#141414] transition-all duration-1000 ease-out" 
-                    style={{ width: `${Math.min(100, Math.max(0, stats.winRate))}%` }} 
-                  />
-                </div>
-              </div>
-              <div className="mt-8 pt-6 border-t border-dashed border-[#141414]/10 flex justify-between items-center">
-                 <div className="text-[10px] font-mono opacity-40 uppercase">Total Trading Fees</div>
-                 <div className="text-sm font-mono font-bold text-rose-500">-${stats.totalFees.toLocaleString()}</div>
-              </div>
-            </div>
-          </div>
-
-          {/* Allocation & Distribution in Tabs Style */}
-          <div className="lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6">
-             <div className="border border-[#141414] p-6 bg-white flex flex-col">
-                <div className="flex items-center justify-between mb-6">
-                  <span className="text-[10px] font-mono uppercase font-bold tracking-widest opacity-40 flex items-center gap-2">
-                    <PieChartIcon size={12} /> 資產佔比配置
-                  </span>
-                </div>
-                <div className="flex-1 min-h-[220px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={pieData}
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={50}
-                        outerRadius={80}
-                        paddingAngle={4}
-                        dataKey="value"
-                      >
-                        {pieData.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                        ))}
-                      </Pie>
-                      <Tooltip 
-                        contentStyle={{ backgroundColor: '#141414', color: '#fff', border: 'none', borderRadius: '4px', fontSize: '10px', fontFamily: 'monospace' }}
-                        itemStyle={{ color: '#fff' }}
-                      />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </div>
-             </div>
-
-             <div className="border border-[#141414] p-6 bg-white flex flex-col">
-                <div className="flex items-center justify-between mb-6">
-                  <span className="text-[10px] font-mono uppercase font-bold tracking-widest opacity-40 flex items-center gap-2">
-                    <BarChart3 size={12} /> 個股損益分佈
-                  </span>
-                </div>
-                <div className="flex-1 min-h-[220px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={barData} layout="vertical">
-                      <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#14141405" />
-                      <XAxis type="number" hide />
-                      <YAxis dataKey="name" type="category" width={60} fontSize={10} font={{family: 'monospace'}} />
-                      <Tooltip 
-                        cursor={{ fill: '#14141405' }}
-                        contentStyle={{ backgroundColor: '#141414', color: '#fff', border: 'none', borderRadius: '4px', fontSize: '10px' }}
-                      />
-                      <Bar dataKey="pnl" radius={[0, 2, 2, 0]}>
-                        {barData.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={entry.pnl >= 0 ? '#10B981' : '#EF4444'} />
-                        ))}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-             </div>
-          </div>
-        </div>
+        <PortfolioOverview stats={stats} pieData={pieData} barData={barData} />
 
         {/* 【詳細繁體中文註解】：AI 資產診斷與汰弱留強建議區塊 */}
         {portfolio.length > 0 && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
             
-            {/* AI 汰弱留強換股建議 (佔 2 欄) */}
-            <div className="lg:col-span-2 border border-[#141414] bg-white p-8 relative overflow-hidden">
-              <div className="flex justify-between items-center border-b border-[#141414]/10 pb-4 mb-6">
-                <div>
-                  <h3 className="font-serif italic text-lg flex items-center gap-2">
-                    <span>🤖</span> AI 汰弱留強換股助手
-                  </h3>
-                  <p className="text-xs text-gray-500 mt-0.5">基於多因子技術面、籌碼流向及機會成本的動態調倉建議。</p>
-                </div>
-                {isLoadingDiagnose && <span className="text-xs text-gray-400 animate-pulse">● 分析中...</span>}
-              </div>
-
-              {diagnosisData?.advice ? (
-                <div className="space-y-6">
-                  {/* AI 診斷短評 */}
-                  <div className="bg-[#141414]/5 rounded-lg p-5 text-sm leading-relaxed text-[#141414]">
-                    <span className="font-bold block mb-1">💡 智投顧問操作指引：</span>
-                    {diagnosisData.advice.aiAdvice}
-                  </div>
-
-                  {/* 診斷清單 */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {/* 建議汰弱持股 */}
-                    <div className="border border-rose-200 bg-rose-50/30 rounded-lg p-4">
-                      <span className="text-xs font-bold text-rose-800 uppercase block mb-3 font-mono">⚠️ 建議汰弱 (持倉診斷較弱)</span>
-                      {diagnosisData.advice.diagnoses.filter((d: any) => d.isWeak).length === 0 ? (
-                        <p className="text-xs text-gray-500 italic">目前持倉中無明顯破位或籌碼流出標的。</p>
-                      ) : (
-                        <div className="space-y-3">
-                          {diagnosisData.advice.diagnoses.filter((d: any) => d.isWeak).map((d: any) => (
-                            <div key={d.symbol} className="border-b border-rose-100 last:border-b-0 pb-2 last:pb-0">
-                              <div className="flex justify-between text-xs font-bold text-rose-900">
-                                <span>{d.name} ({d.symbol})</span>
-                                <span>${d.price.toFixed(1)}</span>
-                              </div>
-                              <div className="text-[10px] text-rose-700/80 mt-1 space-y-0.5">
-                                {d.reasons.map((r: string, idx: number) => (
-                                  <div key={idx}>• {r}</div>
-                                ))}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* 建議留強候選 */}
-                    <div className="border border-emerald-200 bg-emerald-50/30 rounded-lg p-4">
-                      <span className="text-xs font-bold text-emerald-800 uppercase block mb-3 font-mono">⭐ 建議留強 (市場多頭熱門)</span>
-                      {diagnosisData.advice.strongCandidates.length === 0 ? (
-                        <p className="text-xs text-gray-500 italic">暫無合適的強勢股候選。</p>
-                      ) : (
-                        <div className="space-y-3">
-                          {diagnosisData.advice.strongCandidates.map((c: any) => (
-                            <div key={c.symbol} className="border-b border-emerald-100 last:border-b-0 pb-2 last:pb-0">
-                              <div className="flex justify-between text-xs font-bold text-emerald-900">
-                                <span>{c.name} ({c.symbol})</span>
-                              </div>
-                              <p className="text-[10px] text-emerald-700/80 mt-1 leading-relaxed">{c.reason}</p>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div className="py-12 text-center text-xs opacity-40 italic">
-                  {isLoadingDiagnose ? "正在讀取 AI 智投換股資料..." : "尚未載入診斷結果，請添加持股或重試。"}
-                </div>
-              )}
-            </div>
+            <PortfolioAdvicePanel diagnosisData={diagnosisData} isLoading={isLoadingDiagnose} />
 
             {/* 資產風險健康度 (佔 1 欄) */}
             <div className="border border-[#141414] bg-white p-8 flex flex-col justify-between">

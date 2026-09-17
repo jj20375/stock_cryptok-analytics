@@ -16,6 +16,11 @@ export interface CoinSignal {
   exitHint?: string;
   fundingRate?: number | null;
   nextFundingTime?: number | null;
+  /** 同一現貨來源的已收盤資料；資金費率另取 Binance 永續，不混充同一商品價格。 */
+  source?: string;
+  barTime?: number;
+  changePct?: number;
+  closes?: number[];
   /** 該幣種資料查詢或評估失敗時的錯誤說明(此時其餘欄位皆為 undefined) */
   error?: string;
 }

@@ -2,6 +2,7 @@ import { type LoaderFunctionArgs } from "react-router";
 import { runStockDailyStrategy } from "../services/strategyEngine";
 import { runUsCryptoStockSignals } from "../services/usCryptoSignalService";
 import { runStockAutoTrading } from "../services/usStockAutoTrading";
+import { runUsStockRadar } from "../services/usStockRadar/scanner";
 import { getUserId } from "../utils/auth";
 
 /**
@@ -48,6 +49,16 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       return Response.json({
         success: true,
         message: "虛擬幣概念美股訊號掃描已執行,有訊號時會推播 Slack。",
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    // 手動觸發美股 15 分潛力雷達；仍只處理已收盤行情，且只會送往獨立美股頻道。
+    if (type === "us-stock-radar") {
+      await runUsStockRadar(env);
+      return Response.json({
+        success: true,
+        message: "美股潛力雷達已執行；休市時會安全略過，有新候選且獨立頻道已設定時才推播 Slack。",
         timestamp: new Date().toISOString(),
       });
     }
