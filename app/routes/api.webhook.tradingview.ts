@@ -30,7 +30,10 @@
  */
 
 import type { ActionFunctionArgs, LoaderFunctionArgs } from 'react-router';
-import { sendSlackMessage } from '../services/slackService';
+import { sendSlackPost } from '../services/slackService';
+
+/** Slack mrkdwn 的三個特殊字元須跳脫；symbol/note 來自外部 TradingView 訊息，不可信任其格式。 */
+const escapeMrkdwn = (value: string) => value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 
 // 允許的訊號方向(僅供顯示分類用,未列出的值仍會被接受並原樣顯示,不因此拒絕請求)
 const ACTION_LABELS: Record<string, string> = {
@@ -92,11 +95,19 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
   /** TradingView 虛擬幣警報改送獨立即時進場頻道；不 fallback 到一般報表頻道。 */
   const slackChannel = env.CRYPTO_ENTRY_SLACK_CHANNEL_ID || process.env.CRYPTO_ENTRY_SLACK_CHANNEL_ID;
   if (slackToken && slackChannel) {
-    const msg = `📡 *${symbol}｜TradingView ${actionLabel}*\n` +
-      (price != null ? `進場參考 $${price}\n` : '') +
-      (note ? `${note.slice(0, 180)}\n` : '') +
-      `外部策略訊號，未自動下單。`;
-    const sent = await sendSlackMessage(slackToken, slackChannel, msg);
+    /** 卡片樣式跟其他雷達（潛力幣／波段／永續）對齊，靠 📡 圖示與「TradingView」字樣區分來源。 */
+    const title = `📡 ${escapeMrkdwn(symbol)}｜TradingView ${actionLabel}`.slice(0, 150);
+    const fallback = `${title}${price != null ? `｜進場參考 $${price}` : ''}${note ? `｜${note.slice(0, 100)}` : ''}`;
+    const blocks: Array<Record<string, unknown>> = [
+      { type: 'header', text: { type: 'plain_text', text: title, emoji: true } },
+      { type: 'section', fields: [
+        { type: 'mrkdwn', text: `*方向*\n${escapeMrkdwn(actionLabel)}` },
+        ...(price != null ? [{ type: 'mrkdwn', text: `*進場參考價*\n$${price}` }] : []),
+      ] },
+      ...(note ? [{ type: 'section' as const, text: { type: 'mrkdwn' as const, text: escapeMrkdwn(note.slice(0, 180)) } }] : []),
+      { type: 'context', elements: [{ type: 'mrkdwn', text: '外部策略訊號｜系統未驗證策略邏輯｜未自動下單' }] },
+    ];
+    const sent = await sendSlackPost(slackToken, slackChannel, { text: fallback, blocks });
     if (!sent) console.error('🔥 [TradingView Webhook] Slack 推播失敗,訊號未送達');
   } else {
     console.warn('⚠️ [TradingView Webhook] 未設定 Slack,收到訊號但無處推播');
