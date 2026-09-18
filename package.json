@@ -14,8 +14,8 @@
     "preview": "react-router preview",
     "typegen": "react-router typegen",
     "db:generate": "drizzle-kit generate",
-    "db:migrate:local": "wrangler d1 migrations apply DB --local",
-    "db:migrate:remote": "wrangler d1 migrations apply DB --remote"
+    "db:migrate:local": "wrangler d1 migrations apply crypto-analytics-db --local",
+    "db:migrate:remote": "wrangler d1 migrations apply crypto-analytics-db --remote"
   },
   "dependencies": {
     "@google/genai": "^1.29.0",
