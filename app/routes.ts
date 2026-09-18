@@ -28,6 +28,7 @@ export default [
   route("potential-radar", "routes/potential-radar.tsx"),
   route("us-stock-radar", "routes/us-stock-radar.tsx"),
   route("tw-stock-radar", "routes/tw-stock-radar.tsx"),
+  route("tradingview-signals", "routes/tradingview-signals.tsx"),
   route("login", "routes/login.tsx"),
   route("register", "routes/register.tsx"),
   route("portfolio", "routes/portfolio.tsx"),

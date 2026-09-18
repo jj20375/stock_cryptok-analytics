@@ -33,6 +33,7 @@
 
 import type { ActionFunctionArgs, LoaderFunctionArgs } from 'react-router';
 import { sendSlackPost } from '../services/slackService';
+import { recordTradingviewSignal, shouldLogRejection } from '../services/tradingview/signalLog';
 
 /** Slack mrkdwn 的三個特殊字元須跳脫；symbol/note 來自外部 TradingView 訊息，不可信任其格式。 */
 const escapeMrkdwn = (value: string) => value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
@@ -57,6 +58,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
 export async function action({ request, params, context }: ActionFunctionArgs) {
   const env = (context as any).cloudflare.env;
+  /** 以進站時間為準，避免 Slack 或資料庫耗時影響交易配對的時間序。 */
+  const receivedAt = Date.now();
 
   if (request.method !== 'POST') {
     return jsonResponse({ error: '僅支援 POST' }, 405);
@@ -67,6 +70,13 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
   const configuredSecret = env.TRADINGVIEW_WEBHOOK_SECRET as string | undefined;
   if (!configuredSecret || params.secret !== configuredSecret) {
     console.warn('⚠️ [TradingView Webhook] 密鑰驗證失敗,已拒絕請求');
+    /** 記下被拒絕的請求（節流後）才能分辨「TradingView 沒送」與「送了但密鑰不符」。 */
+    if (shouldLogRejection(receivedAt)) {
+      await recordTradingviewSignal(env, {
+        receivedAt, market: 'unknown', symbol: '未知', action: null, price: null, note: null,
+        status: 'REJECTED_AUTH', slackOk: null, rawBody: '', error: '密鑰不符或未設定',
+      });
+    }
     return jsonResponse({ error: 'Unauthorized' }, 401);
   }
 
@@ -78,6 +88,10 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     payload = JSON.parse(rawBody);
   } catch {
     console.error('❌ [TradingView Webhook] 訊息不是合法 JSON,原始內容:', rawBody.slice(0, 200));
+    await recordTradingviewSignal(env, {
+      receivedAt, market: 'unknown', symbol: '未知', action: null, price: null, note: null,
+      status: 'REJECTED_JSON', slackOk: null, rawBody, error: '訊息內容不是合法 JSON',
+    });
     return jsonResponse(
       { error: '訊息內容需為合法 JSON(請檢查 TradingView 警報訊息欄位的引號與逗號)' },
       400
@@ -101,6 +115,9 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
   const cryptoChannel = env.CRYPTO_ENTRY_SLACK_CHANNEL_ID || process.env.CRYPTO_ENTRY_SLACK_CHANNEL_ID;
   const twStockChannel = env.TW_STOCK_SLACK_CHANNEL_ID || process.env.TW_STOCK_SLACK_CHANNEL_ID;
   const slackChannel = market === 'tw_stock' ? twStockChannel : cryptoChannel;
+  /** 以實際投遞的頻道回推 market，確保績效分組與 Slack 分流一致，不被拼錯的值汙染。 */
+  const resolvedMarket = market === 'tw_stock' ? 'tw_stock' : 'crypto';
+  let slackOk: boolean | null = null;
   if (slackToken && slackChannel) {
     /** 卡片樣式跟其他雷達（潛力幣／波段／永續）對齊，靠 📡 圖示與「TradingView」字樣區分來源。 */
     const title = `📡 ${escapeMrkdwn(symbol)}｜TradingView ${actionLabel}`.slice(0, 150);
@@ -114,11 +131,18 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       ...(note ? [{ type: 'section' as const, text: { type: 'mrkdwn' as const, text: escapeMrkdwn(note.slice(0, 180)) } }] : []),
       { type: 'context', elements: [{ type: 'mrkdwn', text: '外部策略訊號｜系統未驗證策略邏輯｜未自動下單' }] },
     ];
-    const sent = await sendSlackPost(slackToken, slackChannel, { text: fallback, blocks });
-    if (!sent) console.error('🔥 [TradingView Webhook] Slack 推播失敗,訊號未送達');
+    slackOk = await sendSlackPost(slackToken, slackChannel, { text: fallback, blocks });
+    if (!slackOk) console.error('🔥 [TradingView Webhook] Slack 推播失敗,訊號未送達');
   } else {
     console.warn('⚠️ [TradingView Webhook] 未設定 Slack,收到訊號但無處推播');
   }
+
+  /** 無論 Slack 成功與否都要落地：績效統計看的是訊號本身，不是通知是否送達。 */
+  await recordTradingviewSignal(env, {
+    receivedAt, market: resolvedMarket, symbol, action: actionRaw, price, note,
+    status: slackToken && slackChannel ? 'ACCEPTED' : 'NO_CHANNEL', slackOk, rawBody,
+    error: slackOk === false ? 'Slack 推播失敗' : null,
+  });
 
   return jsonResponse({ success: true });
 }

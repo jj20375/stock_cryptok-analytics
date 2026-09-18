@@ -11,7 +11,8 @@ import {
   TrendingUp,
   FlaskConical,
   Shield,
-  Radar
+  Radar,
+  Satellite
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -72,6 +73,9 @@ export function AppLayout({ children }: { children: ReactNode }) {
           <Link to="/tw-stock-radar" className={navLinkClass('/tw-stock-radar')} title="台股潛力雷達" aria-label="台股潛力雷達">
             <Radar size={20} />
           </Link>
+          <Link to="/tradingview-signals" className={navLinkClass('/tradingview-signals')} title="TradingView 訊號績效" aria-label="TradingView 訊號績效">
+            <Satellite size={20} />
+          </Link>
         </nav>
         <div className="mt-auto flex flex-col gap-6 pb-4 w-full px-2 items-center">
           {user ? (
@@ -124,6 +128,9 @@ export function AppLayout({ children }: { children: ReactNode }) {
         </Link>
         <Link to="/tw-stock-radar" className={navLinkClass('/tw-stock-radar')} title="台股潛力雷達" aria-label="台股潛力雷達">
           <Radar size={20} />
+        </Link>
+        <Link to="/tradingview-signals" className={navLinkClass('/tradingview-signals')} title="TradingView 訊號績效" aria-label="TradingView 訊號績效">
+          <Satellite size={20} />
         </Link>
         <Link to="/settings" className={navLinkClass("/settings")}>
           <Settings size={20} />

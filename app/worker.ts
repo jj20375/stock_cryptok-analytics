@@ -12,6 +12,7 @@ import { runPotentialRadar } from "./services/potentialRadar/scanner";
 import { runBinancePerpNotificationQueue, runBinancePerpRadar } from "./services/binancePerpRadar/scanner";
 import { runUsStockRadar } from "./services/usStockRadar/scanner";
 import { runTwStockRadar } from "./services/twStockRadar/scanner";
+import { pruneTradingviewData } from "./services/tradingview/signalLog";
 
 const requestHandler = createRequestHandler(build as any);
 
@@ -62,6 +63,8 @@ export default {
                     ctx.waitUntil(runStockDailyStrategy(env, "TW", "market"));
                     // 回測用 K 線快取每日增量更新，失敗不影響市場日報。
                     ctx.waitUntil(runDailyKlineRefresh(env));
+                    // TradingView 原始訊號 log 每日清理逾期資料，避免 D1 被 payload 撐大。
+                    ctx.waitUntil(pruneTradingviewData(env));
                 } else if (scheduledMinute === 15) {
                     ctx.waitUntil(runStockDailyStrategy(env, "TW", "strategy"));
                 }

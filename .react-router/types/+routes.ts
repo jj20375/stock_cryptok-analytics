@@ -93,6 +93,9 @@ type Pages = {
   "/tw-stock-radar": {
     params: {};
   };
+  "/tradingview-signals": {
+    params: {};
+  };
   "/login": {
     params: {};
   };
@@ -110,7 +113,7 @@ type Pages = {
 type RouteFiles = {
   "root.tsx": {
     id: "root";
-    page: "/" | "/dashboard" | "/stock-analysis" | "/api/top50" | "/api/stock/*" | "/api/gemini" | "/api/logout" | "/api/test-telegram" | "/api/test-slack" | "/api/test-strategy" | "/api/test-crypto" | "/api/portfolio" | "/api/analyze-stock" | "/api/run-report" | "/api/backtest" | "/backtest" | "/api/warroom" | "/api/freqtrade/sync" | "/api/freqtrade/research" | "/api/potential-radar/chart" | "/api/webhook/tradingview/:secret" | "/warroom" | "/wave-radar" | "/potential-radar" | "/us-stock-radar" | "/tw-stock-radar" | "/login" | "/register" | "/portfolio" | "/settings";
+    page: "/" | "/dashboard" | "/stock-analysis" | "/api/top50" | "/api/stock/*" | "/api/gemini" | "/api/logout" | "/api/test-telegram" | "/api/test-slack" | "/api/test-strategy" | "/api/test-crypto" | "/api/portfolio" | "/api/analyze-stock" | "/api/run-report" | "/api/backtest" | "/backtest" | "/api/warroom" | "/api/freqtrade/sync" | "/api/freqtrade/research" | "/api/potential-radar/chart" | "/api/webhook/tradingview/:secret" | "/warroom" | "/wave-radar" | "/potential-radar" | "/us-stock-radar" | "/tw-stock-radar" | "/tradingview-signals" | "/login" | "/register" | "/portfolio" | "/settings";
   };
   "routes/home.tsx": {
     id: "routes/home";
@@ -216,6 +219,10 @@ type RouteFiles = {
     id: "routes/tw-stock-radar";
     page: "/tw-stock-radar";
   };
+  "routes/tradingview-signals.tsx": {
+    id: "routes/tradingview-signals";
+    page: "/tradingview-signals";
+  };
   "routes/login.tsx": {
     id: "routes/login";
     page: "/login";
@@ -262,6 +269,7 @@ type RouteModules = {
   "routes/potential-radar": typeof import("./app/routes/potential-radar.tsx");
   "routes/us-stock-radar": typeof import("./app/routes/us-stock-radar.tsx");
   "routes/tw-stock-radar": typeof import("./app/routes/tw-stock-radar.tsx");
+  "routes/tradingview-signals": typeof import("./app/routes/tradingview-signals.tsx");
   "routes/login": typeof import("./app/routes/login.tsx");
   "routes/register": typeof import("./app/routes/register.tsx");
   "routes/portfolio": typeof import("./app/routes/portfolio.tsx");
