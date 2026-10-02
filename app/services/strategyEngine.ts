@@ -706,7 +706,7 @@ export const runStockDailyStrategy = async (env: any, market: "TW" | "US" = "TW"
       if (market === "US") {
         /** 美股日報以 Block Kit 分區顯示；fallback text 保留手機推播摘要，發送目的地仍是原股票日報頻道。 */
         await sendSlackPost(slackToken, slackChannel, createUsStockDailyCard({
-          date: dateStr, type, topGainers, mostActive, macro: macroCard, strategySections,
+          date: dateStr, type, topGainers, mostActive, macro: macroCard, strategySections: strategyCardSections,
         }));
       } else {
         await sendSlackMessage(slackToken, slackChannel, slackMsg);
