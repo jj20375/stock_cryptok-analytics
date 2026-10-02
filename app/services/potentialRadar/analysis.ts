@@ -1,7 +1,7 @@
 /** @file 純量價分析與觀察績效追蹤；無請求、通知或下單副作用。 */
-import { DAY_MS, QUARTER_MS, RADAR_RULES, type RadarCandle, type RadarDepth,
+import { DAY_MS, FOUR_HOUR_MS, QUARTER_MS, RADAR_RULES, type RadarCandle, type RadarDepth,
   type RadarObservation, type RadarSignal, type TrendConfirmation } from './types';
-import { analyzeBigFish } from './bigFish';
+import { BIG_FISH_RULES, type BigFishSignal } from './bigFish';
 
 const mean = (values: number[]) => values.reduce((sum, n) => sum + n, 0) / values.length;
 const pct = (value: number, base: number) => (value / base - 1) * 100;
@@ -21,6 +21,25 @@ export function closedSeries(input: RadarCandle[], cutoff: number): RadarCandle[
     }
   }
   if (candles.at(-1)!.openTime + QUARTER_MS !== cutoff) throw new Error('缺少最新已收盤 15 分行情');
+  return candles;
+}
+
+/**
+ * 吃大魚專用的 4 小時已收盤序列驗證：只需 OHLC，至少 201 根（約 34 天）才能算 EMA200。
+ * 缺根、未對齊 UTC 4 小時邊界或最新收盤未就緒一律拒絕，寧可本輪不顯示也不以錯誤序列判斷進場。
+ */
+export function closedFourHourSeries(input: RadarCandle[], fourHourCutoff: number): RadarCandle[] {
+  const candles = input.filter(c => c.openTime < fourHourCutoff).sort((a, b) => a.openTime - b.openTime);
+  if (candles.length < BIG_FISH_RULES.emaPeriod + 1) throw new Error('4 小時歷史不足 201 根，暫無法判斷吃大魚');
+  for (let i = 0; i < candles.length; i++) {
+    const c = candles[i];
+    if (![c.openTime, c.open, c.high, c.low, c.close].every(Number.isFinite) || c.openTime % FOUR_HOUR_MS !== 0 ||
+      Math.min(c.open, c.close, c.low) <= 0 || c.high < Math.max(c.open, c.close, c.low) || c.low > Math.min(c.open, c.close) ||
+      (i > 0 && c.openTime !== candles[i - 1].openTime + FOUR_HOUR_MS)) {
+      throw new Error('4 小時行情含缺口或無效資料，暫停判斷吃大魚');
+    }
+  }
+  if (candles.at(-1)!.openTime + FOUR_HOUR_MS !== fourHourCutoff) throw new Error('缺少最新已收盤 4 小時行情');
   return candles;
 }
 
@@ -118,13 +137,17 @@ function structure(candles: RadarCandle[]) {
   return { atr, breakout, retest, compressed, volumeRatio: volumeAt(index) };
 }
 
-/** 所有報酬比較都以相同截止時間計算；相對強勢仍可能是跌得較少。 */
-export function analyzePotential(candles: RadarCandle[], btc: RadarCandle[], depth: RadarDepth): RadarSignal {
+/**
+ * 所有報酬比較都以相同截止時間計算；相對強勢仍可能是跌得較少。
+ * 吃大魚改由呼叫端以 4 小時 K 線另行計算後傳入（undefined 表示本輪尚未算到），這裡不再從 15 分 K 推算，
+ * 因為 1000 根 15 分 K 只能合成約 62 根 4 小時線，不足 EMA200 所需的 201 根。
+ */
+export function analyzePotential(candles: RadarCandle[], btc: RadarCandle[], depth: RadarDepth,
+  bigFish?: BigFishSignal | null): RadarSignal {
   const current = candles.at(-1)!;
   if (current.openTime !== btc.at(-1)?.openTime) throw new Error('BTC 與標的行情時間不一致');
   const change = (series: RadarCandle[], bars: number) => pct(series.at(-1)!.close, series.at(-1 - bars)!.close);
   const s = structure(candles);
-  const bigFish = analyzeBigFish(candles);
   const hourly = aggregate(candles, 4);
   const fourHourly = aggregate(candles, 16);
   const daily = aggregate(candles, 96);

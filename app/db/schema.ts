@@ -7,6 +7,7 @@ export { freqtradeRuns } from './freqtradeSchema';
 export { binancePerpRun, binancePerpAlerts } from './binancePerpSchema';
 export { usStockRadar, usStockObservations, usStockRadarRun, usStockRadarNotifications } from './usStockRadarSchema';
 export { twStockRadar, twStockObservations, twStockRadarRun, twStockRadarNotifications } from './twStockRadarSchema';
+export { cryptoAutoOrders } from './cryptoAutoTradeSchema';
 
 // 【詳細繁體中文註解】：使用者資料表
 export const users = sqliteTable('users', {
@@ -37,6 +38,24 @@ export const users = sqliteTable('users', {
   bitgetApiSecret: text('bitget_api_secret'),
   bitgetPassphrase: text('bitget_passphrase'),
 
+  // 【安全性註解】：Bitget Demo 金鑰與正式金鑰分欄加密保存，避免測試功能誤拿正式盤權限。
+  // Demo API 請求還會固定帶 paptrading:1；即使欄位誤填正式金鑰，Bitget 也應拒絕而非成交。
+  bitgetDemoApiKey: text('bitget_demo_api_key'),
+  bitgetDemoApiSecret: text('bitget_demo_api_secret'),
+  bitgetDemoPassphrase: text('bitget_demo_passphrase'),
+  // 【風控註解】：使用者僅能設定 1 至 50 倍的「上限」；每次進場仍要取 Bitget 合約實際可用上限。
+  // 此值不會放大名目倉位，避免高槓桿繞過既有單筆風險與最大部位限制。
+  bitgetDemoMaxLeverage: integer('bitget_demo_max_leverage').default(1).notNull(),
+
+  // 【安全性註解】：正式 USDT 永續使用獨立金鑰，絕不沿用現貨／股票代幣或 Demo 憑證。
+  // executionMode 預設 DEMO；切到 LIVE 後仍須同時開啟 liveTradingEnabled 才能建立真實新倉。
+  bitgetFuturesLiveApiKey: text('bitget_futures_live_api_key'),
+  bitgetFuturesLiveApiSecret: text('bitget_futures_live_api_secret'),
+  bitgetFuturesLivePassphrase: text('bitget_futures_live_passphrase'),
+  bitgetFuturesExecutionMode: text('bitget_futures_execution_mode').default('DEMO').notNull(),
+  // 【風控註解】：正式盤槓桿另行設定，預設 1 倍；實際值仍受合約上限與倉位風控限制。
+  bitgetFuturesLiveMaxLeverage: integer('bitget_futures_live_max_leverage').default(1).notNull(),
+
   // 【詳細繁體中文註解】：加密貨幣自動交易偏好使用的交易所:BINANCE(預設，向下相容既有行為) | BITGET
   preferredExchange: text('preferred_exchange').default('BINANCE').notNull(),
 
@@ -45,6 +64,11 @@ export const users = sqliteTable('users', {
   // 系統會透過 Bitget 股票代幣(rToken)實際下單，同樣受 tradingMode(PAPER/LIVE)
   // 與 liveTradingEnabled 雙重開關保護。
   stockAutoTradingEnabled: integer('stock_auto_trading_enabled', { mode: 'boolean' }).default(false).notNull(),
+
+  // 【風控註解】：兩個來源各自預設關閉；啟用後依合約專用模式選擇 Demo 或 LIVE。
+  // 欄位名稱保留 Demo 是為了向下相容；LIVE 仍需模式、正式專用金鑰與總實戰授權三項檢查。
+  tradingviewDemoAutoTradingEnabled: integer('tradingview_demo_auto_trading_enabled', { mode: 'boolean' }).default(false).notNull(),
+  internalDemoAutoTradingEnabled: integer('internal_demo_auto_trading_enabled', { mode: 'boolean' }).default(false).notNull(),
 
   // 帳號建立與更新時間
   createdAt: text('created_at').default(sql`(CURRENT_TIMESTAMP)`).notNull(),

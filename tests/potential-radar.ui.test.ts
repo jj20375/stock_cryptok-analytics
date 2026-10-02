@@ -6,6 +6,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { createStaticHandler, createStaticRouter, StaticRouterProvider } from 'react-router';
 import PotentialRadarPage, { loader } from '../app/routes/potential-radar';
 import { analyzePotential } from '../app/services/potentialRadar/analysis';
+import { analyzeBigFish } from '../app/services/potentialRadar/bigFish';
 import { QUARTER_MS } from '../app/services/potentialRadar/types';
 import { potentialFixture, healthyDepth, healthyDerivatives } from './helpers/potentialFixture';
 import { RadarCard } from '../app/features/potentialRadar/RadarCards';
@@ -18,7 +19,9 @@ test('未登入不得讀取潛力幣雷達', async () => {
 
 export async function renderPotentialPreview(stale = false) {
   const cutoff = Math.floor(Date.now() / QUARTER_MS) * QUARTER_MS;
-  const signal = analyzePotential(potentialFixture(cutoff), potentialFixture(cutoff, false), healthyDepth);
+  /** 正式掃描以 4 小時 K 另算吃大魚並標記 timeframe；計算函式不綁週期，這裡沿用同一組合成序列。 */
+  const fish = analyzeBigFish(potentialFixture(cutoff));
+  const signal = analyzePotential(potentialFixture(cutoff), potentialFixture(cutoff, false), healthyDepth, fish && { ...fish, timeframe: '4h' });
   signal.derivatives = healthyDerivatives;
   const now = cutoff + (stale ? QUARTER_MS : 120_000);
   const data = { now, enabled: true, error: null, observations: [],
@@ -40,7 +43,7 @@ test('呈現多週期依據、分數限制與空榜；上一根訊號不能留�
   assert.ok(html.includes('不是暴漲機率'));
   assert.ok(html.includes('分數構成與流動性'));
   assert.ok(html.includes('吃大魚進場'));
-  assert.ok(html.includes('吃大魚 2.0 · 15 分線'));
+  assert.ok(html.includes('吃大魚 2.0 · 4 小時線'));
   assert.ok(html.includes('趨勢共振 · 4h MA20＋日線 MA7'));
   assert.ok(html.includes('Gate 永續 · 健康趨勢'));
   assert.ok(html.includes('OI／近 1h'));
@@ -58,7 +61,8 @@ test('呈現多週期依據、分數限制與空榜；上一根訊號不能留�
 });
 
 test('卡片分開呈現原始訊號與風控排除，舊快照不推定為未觸發', () => {
-  const signal = analyzePotential(potentialFixture(Date.UTC(2026, 8, 14)), potentialFixture(Date.UTC(2026, 8, 14), false), healthyDepth);
+  const series = potentialFixture(Date.UTC(2026, 8, 14));
+  const signal = analyzePotential(series, potentialFixture(Date.UTC(2026, 8, 14), false), healthyDepth, analyzeBigFish(series));
   const snapshot = { symbol: 'EXAMPLEUSDT', signal, checkedAt: 0, error: null };
   const blocked = renderToStaticMarkup(createElement(RadarCard, { snapshot: { ...snapshot, signal: { ...signal, phase: 'EXTENDED' } } }));
   assert.ok(blocked.includes('原始進場條件成立，但漲幅過熱'));

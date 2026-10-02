@@ -72,7 +72,7 @@ export default function PotentialRadarPage() {
     </header>
     <section className="rounded-xl border border-black/15 bg-white/70 p-4 text-sm space-y-2">
       <p><strong>觀察用途：</strong>分數代表量價條件符合程度，不是暴漲機率。只用已收盤 K 線，不會自動下單。</p>
-      <p><strong>吃大魚 2.0：</strong>15 分 MACD（12／26／9）金叉且收盤 &gt; EMA200 × 0.98，或 Supertrend（ATR 10、係數 4）翻綠，即標示進場。通過流動性與過熱檢查後可獨立列入優先觀察，量價分數維持原算法。</p>
+      <p><strong>吃大魚 2.0（4 小時線）：</strong>4 小時 MACD（12／26／9）金叉且收盤 &gt; EMA200 × 0.98，或 Supertrend（ATR 10、係數 4）翻綠，即標示進場；結果沿用到下一根 4 小時收盤，新幣不足約 34 天歷史時暫不判斷。通過流動性與過熱檢查後可獨立列入優先觀察，量價分數仍以 15 分線計算。</p>
       <p><strong>趨勢共振：</strong>4 小時 MA20 回踩後收盤轉強，加上已收盤日線 MA7 向上時標示已確認，並優先排序；不足八根完整日線時只顯示資料不足，不會判成反向。</p>
       <p><strong>永續籌碼：</strong>前三個優先候選會再讀取 Gate OI、資金費率、多空比與清算量，分類為健康趨勢、軋空、多頭擁擠、新增空單或去槓桿；只作訊號品質提示，不改寫原始進場條件。</p>
       <p className="opacity-70">ST 紅色時顯示多單出場條件；原碼未實作「獲利 3% 後保本」。吃大魚分類包含遭風控排除的原始觸發；不同交易所與歷史長度可能使訊號有別於 TradingView。</p>

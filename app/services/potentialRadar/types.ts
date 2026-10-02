@@ -2,13 +2,17 @@
 import type { Candle } from '../strategy/types';
 import type { BigFishSignal } from './bigFish';
 
-/** 只分析已收盤 15 分線；所有週期都從同一來源聚合，避免跨所量能混用。 */
+/** 量價分析只看已收盤 15 分線；所有量價週期都從同一來源聚合，避免跨所量能混用。 */
 export const QUARTER_MS = 15 * 60 * 1000;
+/** 吃大魚改看 4 小時線：由 bigFishJob 另抓同一現貨來源的 4 小時 K 線計算，與 15 分量價分析分開。 */
+export const FOUR_HOUR_MS = 4 * 60 * 60 * 1000;
 export const DAY_MS = 24 * 60 * 60 * 1000;
 /** 以下門檻是未經樣本外驗證的現貨做多觀察假設，不代表上漲機率。 */
 export const RADAR_RULES = {
-  /** 新增 Gate 永續籌碼確認後升版，讓同一根舊快照重新計算一次。 */
-  version: '15m-v4-derivatives',
+  /** 吃大魚改為 4 小時線後升版，讓舊 15 分吃大魚快照與通知事件 ID 不會被沿用。 */
+  version: '15m-v5-big-fish-4h',
+  /** 吃大魚通知只在 4 小時收盤後一小時內發送，避免輪替晚算的標的以過時進場價推播。 */
+  bigFishNoticeWindowMs: 60 * 60 * 1000,
   /** 排除單一交易所近 24 小時成交額低於 500 萬 USDT 的薄量標的。 */
   minTurnover: 5_000_000,
   /** 百分比單位；價差超過 0.3% 時不能入榜。 */

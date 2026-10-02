@@ -1,11 +1,12 @@
 /** @file 合成現貨量價；只供離線測試，不代表任何真實幣種或歷史績效。 */
 import { QUARTER_MS, type DerivativeSignal, type RadarCandle } from '../../app/services/potentialRadar/types';
 
-export function potentialFixture(cutoff: number, burst = true, count = 400): RadarCandle[] {
+/** barMs 預設 15 分；4 小時線測試傳入 4 小時毫秒數，產生對齊 UTC 4 小時邊界的序列。 */
+export function potentialFixture(cutoff: number, burst = true, count = 400, barMs = QUARTER_MS): RadarCandle[] {
   return Array.from({ length: count }, (_, i) => {
     const close = burst && i === count - 1 ? 101.2 : 100;
     const volume = burst && i === count - 1 ? 3000 : 1000;
-    return { openTime: cutoff - (count - i) * QUARTER_MS, open: 100, high: Math.max(close, 101), low: 99,
+    return { openTime: cutoff - (count - i) * barMs, open: 100, high: Math.max(close, 101), low: 99,
       close, volume, turnover: volume * close };
   });
 }

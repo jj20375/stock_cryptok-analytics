@@ -1,6 +1,9 @@
 /** @file Gate 現貨公開行情備援；整輪鎖定來源，不與 Bybit 的量能、BTC 或深度混用。 */
-import { closedSeries } from './analysis';
-import { QUARTER_MS, RADAR_RULES, type MarketTicker, type RadarCandle, type RadarDepth } from './types';
+import { closedFourHourSeries, closedSeries } from './analysis';
+import { FOUR_HOUR_MS, QUARTER_MS, RADAR_RULES, type MarketTicker, type RadarCandle, type RadarDepth } from './types';
+
+/** 吃大魚 4 小時線抓 300 根（約 50 天），足夠 EMA200 的 201 根並保留暖機餘裕，回應也維持精簡。 */
+const FOUR_HOUR_BARS = 300;
 
 async function getMarket<T>(path: string, params: Record<string, string> = {}): Promise<T> {
   const response = await fetch(`https://api.gateio.ws/api/v4/spot/${path}?${new URLSearchParams(params)}`, {
@@ -33,6 +36,14 @@ export async function gateCandles(symbol: string, cutoff: number): Promise<Radar
     from: String((cutoff - 1000 * QUARTER_MS) / 1000), to: String(Math.floor((cutoff - 1) / 1000)) });
   return closedSeries(rows.filter(r => r[7] !== 'false').map(r => ({ openTime: Number(r[0]) * 1000,
     open: Number(r[5]), high: Number(r[3]), low: Number(r[4]), close: Number(r[2]), volume: Number(r[6]), turnover: Number(r[1]) })), cutoff);
+}
+
+/** 吃大魚專用的 4 小時 K 線；與 15 分量價同一 Gate 現貨來源，不跨所拼接。 */
+export async function gateFourHourCandles(symbol: string, fourHourCutoff: number): Promise<RadarCandle[]> {
+  const rows = await getMarket<string[][]>('candlesticks', { currency_pair: pairName(symbol), interval: '4h',
+    from: String((fourHourCutoff - FOUR_HOUR_BARS * FOUR_HOUR_MS) / 1000), to: String(Math.floor((fourHourCutoff - 1) / 1000)) });
+  return closedFourHourSeries(rows.filter(r => r[7] !== 'false').map(r => ({ openTime: Number(r[0]) * 1000,
+    open: Number(r[5]), high: Number(r[3]), low: Number(r[4]), close: Number(r[2]), volume: Number(r[6]), turnover: Number(r[1]) })), fourHourCutoff);
 }
 
 export async function gateDepth(symbol: string): Promise<RadarDepth> {

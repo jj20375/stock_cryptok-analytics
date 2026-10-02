@@ -1,13 +1,14 @@
 /** @file 獨立 15 分排程：有限批次抓取、租約防重疊、原子保存入選與可重試的 Slack 通知；絕不下單。 */
 import { and, desc, eq, gte, isNull, lt, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-import { potentialObservations, potentialRadar, potentialRadarNotifications, potentialRun } from '../../db/potentialSchema';
+import { potentialBigFish, potentialObservations, potentialRadar, potentialRadarNotifications, potentialRun } from '../../db/potentialSchema';
 import { analyzePotential, updateObservation } from './analysis';
+import type { BigFishSignal } from './bigFish';
 import { fetchGateDerivativeSignal } from './derivatives';
 import { fetchRadarCandles, fetchRadarDepth, fetchUniverse, selectCandidates } from './market';
 import { formatPotentialCard, selectPotentialNotice } from './notifications';
 import { slackPostFromStored } from '../slack/cryptoSignalCard';
-import { DAY_MS, QUARTER_MS, RADAR_RULES, isRadarCandidate, type RadarObservation,
+import { DAY_MS, FOUR_HOUR_MS, QUARTER_MS, RADAR_RULES, isRadarCandidate, type RadarObservation,
   type RadarRun, type RadarSnapshot } from './types';
 
 /** Slack 權杖及頻道僅由 Worker secret 提供；掃描程式不讀取本機設定檔或交易憑證。 */
@@ -40,10 +41,14 @@ function parseSnapshot(value: string): RadarSnapshot | null {
 
 async function collectScan(db: RadarDb, startedAt: number, notificationsEnabled: boolean) {
   const cutoff = Math.floor(startedAt / QUARTER_MS) * QUARTER_MS;
-  const [observationRows, previousRows] = await Promise.all([
+  /** 吃大魚判斷最新一根已收盤 4 小時 K；結果由獨立排程寫入，同一根在下一次 4 小時收盤前不變。 */
+  const expectedFourHourBar = Math.floor(startedAt / FOUR_HOUR_MS) * FOUR_HOUR_MS - FOUR_HOUR_MS;
+  const [observationRows, previousRows, bigFishRows] = await Promise.all([
     db.select().from(potentialObservations).where(gte(potentialObservations.enteredAt, cutoff - 8 * DAY_MS)),
     /** 未配置 Slack 時不讀取通知相關資料，讓舊 migration 的本機掃描仍可安全運作。 */
     notificationsEnabled ? db.select().from(potentialRadar) : Promise.resolve([]),
+    /** 只多一次讀取查詢；0022 尚未套用時回傳空結果，雷達照常運作、吃大魚顯示未計算。 */
+    db.select().from(potentialBigFish).where(eq(potentialBigFish.barTime, expectedFourHourBar)).catch(() => []),
   ]);
   const observations = observationRows.map(row => JSON.parse(row.observationJson) as RadarObservation);
   const previousBySymbol = new Map(previousRows.map(row => [row.symbol, parseSnapshot(row.snapshotJson)]));
@@ -69,6 +74,16 @@ async function collectScan(db: RadarDb, startedAt: number, notificationsEnabled:
   const updates = new Map<string, RadarObservation>();
   const notifications: { id: string; message: string; createdAt: number }[] = [];
   const summary: RadarRun = { version: RADAR_RULES.version, source, startedAt, completedAt: 0, eligible: universe.length, selected: selected.length, scanned: 0, failed: 0, error: null };
+  /**
+   * 只採用「同來源、同一根 4 小時 K」且計算成功的結果；尚未算到或計算失敗為 undefined（顯示未計算），
+   * 絕不沿用上一根 4 小時的 entry，以免舊訊號冒充新進場。
+   */
+  const fourHourBigFish = new Map<string, BigFishSignal>();
+  for (const row of bigFishRows) {
+    if (row.source !== source || !row.signalJson) continue;
+    try { fourHourBigFish.set(row.symbol, { ...JSON.parse(row.signalJson) as BigFishSignal, timeframe: '4h' }); }
+    catch { /** 單筆損壞只讓該標的顯示未計算。 */ }
+  }
   const scanSymbol = async (symbol: string) => {
     try {
       const candles = symbol === 'BTCUSDT' ? btc : await fetchRadarCandles(symbol, cutoff, source);
@@ -83,7 +98,7 @@ async function collectScan(db: RadarDb, startedAt: number, notificationsEnabled:
         return;
       }
       const depth = await fetchRadarDepth(symbol, source);
-      const signal = analyzePotential(candles, btc, depth);
+      const signal = analyzePotential(candles, btc, depth, fourHourBigFish.get(symbol));
       signal.source = source;
       /** null 明確表示新版已掃描，但本輪尚未使用有限的永續精算名額；舊快照則維持 undefined。 */
       signal.derivatives = null;

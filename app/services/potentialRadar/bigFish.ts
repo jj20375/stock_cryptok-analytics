@@ -1,10 +1,14 @@
-/** @file 吃大魚 2.0 的純 15 分線條件計算；輸入已驗證的收盤序列，不模擬持倉、不下單。 */
+/**
+ * @file 吃大魚 2.0 的純條件計算；輸入已驗證的收盤序列，不模擬持倉、不下單。
+ * 本函式不綁定週期：虛擬幣永續／潛力幣雷達與美股／台股雷達目前皆餵入 4 小時 K 線，週期由呼叫端決定。
+ */
 import { calculateEMA, calculateMACD } from '../stockService';
 import type { Candle } from '../strategy/types';
 
 /** 沿用使用者 Pine 參數；僅觀察做多訊號，未經樣本外驗證。 */
 export const BIG_FISH_RULES = {
-  version: 'big-fish-2.0-15m-v1',
+  /** 版本只描述條件公式；K 線週期由呼叫端以 timeframe 欄位另行標示。 */
+  version: 'big-fish-2.0-v1',
   atrPeriod: 10,
   /** 四倍 Wilder ATR 容忍較大波動，也意味防守線可能較遠。 */
   factor: 4,
@@ -18,6 +22,11 @@ export const BIG_FISH_RULES = {
 
 export interface BigFishSignal {
   version: string;
+  /**
+   * 計算所用的 K 線週期；潛力幣雷達以此判斷快取是否為新版 4 小時結果。
+   * 舊快照沒有此欄，一律視為 15 分線舊結果而重新計算，不可沿用。
+   */
+  timeframe?: '15m' | '4h';
   /** UTC 毫秒，對應唯一觸發根的開盤時間；下一根不沿用金叉／翻綠事件。 */
   barTime: number;
   earlyLong: boolean;
@@ -70,7 +79,7 @@ export function bigFishSupertrend(candles: Candle[]) {
   return { line, direction };
 }
 
-/** 至少 201 根才判斷 EMA200 與前根交叉；呼叫端另負責完整 15 分線及新鮮度驗證。 */
+/** 至少 201 根才判斷 EMA200 與前根交叉；呼叫端另負責 K 線完整性及新鮮度驗證。 */
 export function analyzeBigFish(candles: Candle[]): BigFishSignal | null {
   if (candles.length < BIG_FISH_RULES.emaPeriod + 1) return null;
   const closes = candles.map(c => c.close);

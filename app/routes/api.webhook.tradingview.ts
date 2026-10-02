@@ -12,12 +12,10 @@
  * 只有密鑰跟 env.TRADINGVIEW_WEBHOOK_SECRET 完全相符才會處理,其餘一律回 401 且不留下
  * 「密鑰是否存在」之類的線索,避免被暴力猜測。
  *
- * 【目前的整合範圍,刻意保守】
- * 這是外部、未經任何登入驗證的來源送進來的資料 — 除了密鑰比對之外,系統完全無法保證
- * TradingView 那端的策略邏輯是對的、Pine Script 有沒有寫錯、或密鑰有沒有外流。
- * 因此目前只做「驗證後轉發 Slack 通知」,不寫入 paper_trades、不觸發任何自動下單引擎。
- * 若之後要提升(例如記錄成模擬倉位追蹤績效、或串接 Bitget/Binance 自動下單),
- * 請先確認這條路徑已經穩定運作一段時間,再另外評估提升後的風控設計。
+ * 【交易整合範圍】
+ * 通知行為維持相容；只有使用者另行開啟 TradingView 合約訊號時，才會把白名單方向與
+ * 有效價格交給 Bitget Demo／LIVE 永續多單引擎。LIVE 還須專用憑證、LIVE 模式與總實戰
+ * 授權同時成立；Cloudflare 重試則由包含執行環境的事件鍵去重。
  *
  * 【設定方式】
  * 1. 在 Cloudflare 設定機密:wrangler secret put TRADINGVIEW_WEBHOOK_SECRET
@@ -34,6 +32,8 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from 'react-router';
 import { sendSlackPost } from '../services/slackService';
 import { recordTradingviewSignal, shouldLogRejection } from '../services/tradingview/signalLog';
+import { processCryptoFuturesSignal } from '../services/cryptoAutoTrading/engine';
+import { tradingViewPayloadToAutoSignal } from '../services/cryptoAutoTrading/signal';
 
 /** Slack mrkdwn 的三個特殊字元須跳脫；symbol/note 來自外部 TradingView 訊息，不可信任其格式。 */
 const escapeMrkdwn = (value: string) => value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
@@ -117,6 +117,10 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
   const slackChannel = market === 'tw_stock' ? twStockChannel : cryptoChannel;
   /** 以實際投遞的頻道回推 market，確保績效分組與 Slack 分流一致，不被拼錯的值汙染。 */
   const resolvedMarket = market === 'tw_stock' ? 'tw_stock' : 'crypto';
+  /** 僅 crypto payload 可轉入 Bitget 合約引擎；台股與格式不完整訊號仍只保留原本通知。 */
+  const autoTradeSignal = resolvedMarket === 'crypto'
+    ? tradingViewPayloadToAutoSignal(payload, receivedAt)
+    : null;
   let slackOk: boolean | null = null;
   if (slackToken && slackChannel) {
     /** 卡片樣式跟其他雷達（潛力幣／波段／永續）對齊，靠 📡 圖示與「TradingView」字樣區分來源。 */
@@ -129,7 +133,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
         ...(price != null ? [{ type: 'mrkdwn', text: `*進場參考價*\n${priceCurrency}${price}` }] : []),
       ] },
       ...(note ? [{ type: 'section' as const, text: { type: 'mrkdwn' as const, text: escapeMrkdwn(note.slice(0, 180)) } }] : []),
-      { type: 'context', elements: [{ type: 'mrkdwn', text: '外部策略訊號｜系統未驗證策略邏輯｜未自動下單' }] },
+      { type: 'context', elements: [{ type: 'mrkdwn', text: '外部策略訊號｜Bitget 合約自動交易須在設定頁另行開啟' }] },
     ];
     slackOk = await sendSlackPost(slackToken, slackChannel, { text: fallback, blocks });
     if (!slackOk) console.error('🔥 [TradingView Webhook] Slack 推播失敗,訊號未送達');
@@ -144,5 +148,13 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     error: slackOk === false ? 'Slack 推播失敗' : null,
   });
 
-  return jsonResponse({ success: true });
+  if (autoTradeSignal) {
+    /** TradingView 約三秒即中止慢 Webhook；回覆前只排入 waitUntil，交易所 I/O 在背景完成。 */
+    const futuresTask = processCryptoFuturesSignal(env, autoTradeSignal);
+    const executionContext = (context as any).cloudflare.ctx as { waitUntil?: (promise: Promise<unknown>) => void } | undefined;
+    if (executionContext?.waitUntil) executionContext.waitUntil(futuresTask);
+    else await futuresTask;
+  }
+
+  return jsonResponse({ success: true, futuresQueued: Boolean(autoTradeSignal) });
 }

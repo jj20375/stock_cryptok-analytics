@@ -1,4 +1,4 @@
-/** @file HTTP 與各獨立排程入口；行情雷達只產生公開市場觀察與使用者授權的 Slack 通知，絕不下單。 */
+/** @file HTTP 與排程入口；Bitget 合約依獨立憑證、模式與實戰授權執行。 */
 import { createRequestHandler } from "react-router";
 // @ts-ignore
 // 引入由 React Router 在建置時產生的伺服器端進入點
@@ -9,10 +9,12 @@ import { runStockAutoTrading } from "./services/usStockAutoTrading";
 import { runDailyKlineRefresh } from "./services/marketData/klineRefresh";
 import { runWaveRadar } from "./services/waveRadar/scanner";
 import { runPotentialRadar } from "./services/potentialRadar/scanner";
+import { runPotentialBigFish } from "./services/potentialRadar/bigFishJob";
 import { runBinancePerpNotificationQueue, runBinancePerpRadar } from "./services/binancePerpRadar/scanner";
 import { runUsStockRadar } from "./services/usStockRadar/scanner";
 import { runTwStockRadar } from "./services/twStockRadar/scanner";
 import { pruneTradingviewData } from "./services/tradingview/signalLog";
+import { runCryptoFuturesStopMonitor } from "./services/cryptoAutoTrading/stopMonitor";
 
 const requestHandler = createRequestHandler(build as any);
 
@@ -33,25 +35,38 @@ export default {
 
         // 使用 ctx.waitUntil 確保非同步任務在 Worker 結束前完成
         switch (cron) {
-            case "1,3,4,16,18,19,31,33,34,46,48,49 * * * *":
-                if (scheduledMinute % 15 === 1) {
-                    /** 每根 15 分收盤後一分鐘掃描 Gate；與美股錯開，避免共用同次 Worker 請求額度。 */
-                    ctx.waitUntil(runBinancePerpRadar(env));
-                } else if (scheduledMinute % 15 === 3) {
+            case "1,2,3,4,5,7,8,16,17,18,19,20,22,23,31,32,33,34,35,37,38,46,47,48,49,50,52,53 * * * *": {
+                const quarterOffset = scheduledMinute % 15;
+                if (quarterOffset >= 1 && quarterOffset <= 4) {
+                    /**
+                     * 永續吃大魚改看 4 小時線：每 15 分鐘仍喚醒四個分片，但同一根 4 小時 K 已成功的分片會直接略過，
+                     * 實際行情掃描每 4 小時各一次；失敗的分片則利用之後的 15 分槽位自動重試。
+                     */
+                    ctx.waitUntil(runBinancePerpRadar(env, quarterOffset - 1));
+                } else if (quarterOffset === 5) {
+                    /**
+                     * 潛力幣 4 小時吃大魚獨立計算，緊接在 :06 的雷達之前；獨立一次執行才有自己的 50 個子請求額度。
+                     * 與同分鐘觸發的「每五分鐘」排程是不同 Trigger、不同執行，互不分享額度。只寫觀察結果，絕不下單。
+                     */
+                    ctx.waitUntil(runPotentialBigFish(env));
+                } else if (quarterOffset === 7) {
                     /** 每 15 分鐘輕量檢查 SPY，只在新的 4h／收盤段完成時執行美股全掃描。 */
                     ctx.waitUntil(runUsStockRadar(env));
-                } else if (scheduledMinute % 15 === 4) {
+                } else if (quarterOffset === 8) {
                     /** 台股再錯開一分鐘；先輕量檢查 0050，只在 13:00／13:30 新收盤段執行完整掃描。 */
                     ctx.waitUntil(runTwStockRadar(env));
                 }
                 break;
-            case "2,17,32,47 * * * *":
-                /** 收盤後兩分鐘獨立執行；合格新候選入列後才由既有 Slack 設定補送，絕不呼叫下單服務。 */
+            }
+            case "6,21,36,51 * * * *":
+                /** 永續四批完成後執行現貨潛力幣；合格新候選才由既有 Slack 設定補送。 */
                 ctx.waitUntil(runPotentialRadar(env));
                 break;
             case "*/5 * * * *":
-                /** 每五分鐘僅送一則既有 Gate 通知；不重抓行情，並以共用租約避免和完整掃描重複發送。 */
+                /** 每五分鐘僅送一則既有永續通知；不重抓行情，並以共用租約避免和完整掃描重複發送。 */
                 ctx.waitUntil(runBinancePerpNotificationQueue(env));
+                /** Demo／LIVE 永續進場皆附原生停損；五分鐘再以 Mark Price 備援檢查。 */
+                ctx.waitUntil(runCryptoFuturesStopMonitor(env));
                 if (scheduledMinute % 15 === 0) {
                     ctx.waitUntil(runStrategyEngine(env));
                     // 波段雷達仍每 15 分鐘執行，不因通知佇列加速而增加行情請求。

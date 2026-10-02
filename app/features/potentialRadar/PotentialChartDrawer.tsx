@@ -21,12 +21,16 @@ interface PotentialChartDrawerProps {
   onClose: () => void;
 }
 
-/** 將雷達卡片的當根訊號標在 15 分 K 線；切到較大週期時仍保留文字說明，避免錯位標記。 */
+/** 吃大魚計算所在的週期；舊快照沒有 timeframe 欄位時代表升級前的 15 分線結果。 */
+const bigFishInterval = (snapshot: RadarSnapshot | null): PotentialChartInterval =>
+  snapshot?.signal?.bigFish?.timeframe === '4h' ? '4h' : '15m';
+
+/** 只在吃大魚實際計算的週期上標記進場根；切到其他週期時保留文字說明，避免錯位標記。 */
 function drawBigFishMarker(chart: Chart, snapshot: RadarSnapshot, data: PotentialChartData | null) {
   try {
     chart.removeOverlay({ groupId: OVERLAY_GROUP_ID });
     const fish = snapshot.signal?.bigFish;
-    if (!fish?.entry || data?.interval !== '15m') return;
+    if (!fish?.entry || data?.interval !== bigFishInterval(snapshot)) return;
     const candle = data.candles.find(item => item.openTime === fish.barTime);
     if (!candle) return;
     chart.createOverlay([{
@@ -170,8 +174,8 @@ export function PotentialChartDrawer({ snapshot, onClose }: PotentialChartDrawer
       <div className="grid grid-cols-2 gap-3 border-b border-slate-700 px-4 py-3 text-sm md:grid-cols-4 md:px-6">
         <div><p className="text-xs text-slate-400">最新收盤</p><strong>{latest ? formatPrice(latest.close) : '—'}</strong></div>
         <div><p className="text-xs text-slate-400">本根漲跌</p><strong className={change != null && change < 0 ? 'text-emerald-400' : 'text-rose-400'}>{change == null ? '—' : `${change > 0 ? '+' : ''}${change.toFixed(2)}%`}</strong></div>
-        <div><p className="text-xs text-slate-400">15M 動態防守線 ST</p><strong>{signal.bigFish ? formatPrice(signal.bigFish.supertrend) : '—'}</strong></div>
-        <div><p className="text-xs text-slate-400">15M EMA200</p><strong>{signal.bigFish ? formatPrice(signal.bigFish.ema200) : '—'}</strong></div>
+        <div><p className="text-xs text-slate-400">{bigFishInterval(snapshot).toUpperCase()} 動態防守線 ST</p><strong>{signal.bigFish ? formatPrice(signal.bigFish.supertrend) : '—'}</strong></div>
+        <div><p className="text-xs text-slate-400">{bigFishInterval(snapshot).toUpperCase()} EMA200</p><strong>{signal.bigFish ? formatPrice(signal.bigFish.ema200) : '—'}</strong></div>
       </div>
       <div className="border-b border-slate-700 px-4 py-3 dark md:px-6"><DerivativesPanel derivatives={signal.derivatives} compact /></div>
       <div className="relative min-h-0 flex-1 p-3 md:p-5">
@@ -179,7 +183,7 @@ export function PotentialChartDrawer({ snapshot, onClose }: PotentialChartDrawer
         {loading && <div className="absolute inset-0 grid place-items-center bg-[#0e1725]/75 text-sm text-slate-300"><span className="flex items-center gap-2"><LoaderCircle className="animate-spin" size={18} />讀取已收盤 K 線…</span></div>}
         {error && <div role="alert" className="absolute inset-4 grid place-items-center rounded border border-amber-500/60 bg-[#0e1725]/95 p-5 text-center text-sm text-amber-100">{error}</div>}
       </div>
-      <footer className="border-t border-slate-700 px-4 py-3 text-xs text-slate-400 md:px-6"><span className="inline-flex items-center gap-1"><BarChart3 size={14} />15 分圖會標出吃大魚進場；其他週期只供趨勢對照。K 線皆為 {sourceLabel(source)} 已收盤資料。</span></footer>
+      <footer className="border-t border-slate-700 px-4 py-3 text-xs text-slate-400 md:px-6"><span className="inline-flex items-center gap-1"><BarChart3 size={14} />{bigFishInterval(snapshot) === '4h' ? '4 小時' : '15 分'}圖會標出吃大魚進場；其他週期只供趨勢對照。K 線皆為 {sourceLabel(source)} 已收盤資料。</span></footer>
     </aside>
   </div>;
 }

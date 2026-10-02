@@ -2,8 +2,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { analyzeBigFish, bigFishSupertrend } from '../app/services/potentialRadar/bigFish';
-import { analyzePotential, closedSeries } from '../app/services/potentialRadar/analysis';
-import { isRadarCandidate, QUARTER_MS, type RadarCandle } from '../app/services/potentialRadar/types';
+import { analyzePotential, closedFourHourSeries, closedSeries } from '../app/services/potentialRadar/analysis';
+import { FOUR_HOUR_MS, isRadarCandidate, QUARTER_MS, type RadarCandle } from '../app/services/potentialRadar/types';
 import { healthyDepth, potentialFixture } from './helpers/potentialFixture';
 
 const cutoff = Date.UTC(2026, 8, 14, 12);
@@ -67,19 +67,38 @@ test('獨立吃大魚可讓 WAIT 入選，但不改分數、不繞過流動性�
   const candles = potentialFixture(cutoff, false);
   candles.at(-1)!.close = 100.1;
   const btc = potentialFixture(cutoff, false);
-  const signal = analyzePotential(candles, btc, healthyDepth);
+  /** 正式掃描以 4 小時 K 另算吃大魚後傳入；計算函式不綁週期，這裡直接用同一組合成序列。 */
+  const fish = analyzeBigFish(candles);
+  const signal = analyzePotential(candles, btc, healthyDepth, fish);
   assert.equal(signal.phase, 'WAIT');
   assert.equal(isRadarCandidate(signal), true);
   assert.equal(signal.score, Object.values(signal.parts).reduce((sum, value) => sum + value, 0));
   assert.equal(isRadarCandidate({ ...signal, bigFish: undefined }), false);
   assert.equal(isRadarCandidate({ ...signal, phase: 'BREAKOUT', bigFish: undefined }), true);
-  const thin = analyzePotential(candles, btc, { ...healthyDepth, bid: 0 });
+  const thin = analyzePotential(candles, btc, { ...healthyDepth, bid: 0 }, fish);
   assert.equal(thin.bigFish!.entry, true);
   assert.equal(isRadarCandidate(thin), false);
   const hot = candles.map((c, i) => i === candles.length - 1 ? { ...c, close: 140, high: 140 } : c);
-  const overheated = analyzePotential(hot, btc, healthyDepth);
+  const overheated = analyzePotential(hot, btc, healthyDepth, analyzeBigFish(hot));
   assert.equal(overheated.bigFish!.entry, true);
   assert.equal(isRadarCandidate(overheated), false);
+  /** 未傳入 4 小時結果代表本輪尚未算到，不能推定為未觸發。 */
+  assert.equal(analyzePotential(candles, btc, healthyDepth).bigFish, undefined);
+});
+
+test('4 小時序列驗證：要求 UTC 4 小時對齊、無缺口、最新根已收盤且至少 201 根', () => {
+  const fourHourCutoff = Date.UTC(2026, 8, 14, 12);
+  const series = potentialFixture(fourHourCutoff, false, 300, FOUR_HOUR_MS);
+  assert.equal(closedFourHourSeries(series, fourHourCutoff).length, 300);
+  /** 盤中未收盤的那根會被忽略，不能提前判斷。 */
+  const live = { ...series.at(-1)!, openTime: fourHourCutoff };
+  assert.equal(closedFourHourSeries([...series, live], fourHourCutoff).length, 300);
+  assert.throws(() => closedFourHourSeries(series.slice(0, 200), fourHourCutoff), /歷史不足/);
+  assert.throws(() => closedFourHourSeries(series, fourHourCutoff + FOUR_HOUR_MS), /最新已收盤/);
+  const gap = series.filter((_, i) => i !== 150);
+  assert.throws(() => closedFourHourSeries(gap, fourHourCutoff), /缺口/);
+  /** 15 分間距的序列不得被當成 4 小時線。 */
+  assert.throws(() => closedFourHourSeries(potentialFixture(fourHourCutoff, false, 400), fourHourCutoff), /缺口|無效/);
 });
 
 test('盤中金叉不進榜；最新收盤才觸發，下一根已收盤不延續前根事件', () => {

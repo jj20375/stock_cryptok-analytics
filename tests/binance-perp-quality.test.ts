@@ -27,10 +27,11 @@ test('長紅後首次翻綠、貼近 EMA200 且觸發前未過熱會列為最佳
   assert.equal(quality.grade, 'BEST');
   assert.ok(quality.priorRedBars >= PERP_BEST_SIGNAL_RULES.minimumPriorRedBars);
   assert.ok(quality.emaDistancePct < PERP_BEST_SIGNAL_RULES.maximumEmaDistancePct);
-  assert.equal(quality.prior4hChangePct, 0);
-  assert.equal(quality.prior24hChangePct, 0);
+  assert.equal(quality.priorShortChangePct, 0);
+  assert.equal(quality.priorLongChangePct, 0);
 
   const message = formatPerpSignalMessage({
+    source: 'BINANCE',
     ticker: { symbol: 'AINUSDT', baseAsset: 'AIN', price: 101, change24h: 1, quoteVolume24h: 10_000_000 },
     signal,
     quality,

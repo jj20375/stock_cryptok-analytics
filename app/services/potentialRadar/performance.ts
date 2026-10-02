@@ -31,7 +31,7 @@ const GROUPS: Array<{
   matches: (observation: RadarObservation) => boolean;
 }> = [
   { key: 'ALL', label: '全部入選', description: '最近載入的所有入選研究樣本', matches: () => true },
-  { key: 'BIG_FISH', label: '吃大魚進場', description: '15 分 MACD 金叉或 Supertrend 翻綠',
+  { key: 'BIG_FISH', label: '吃大魚進場', description: '4 小時 MACD 金叉或 Supertrend 翻綠（升級前樣本為 15 分線）',
     matches: observation => observation.signal.bigFish?.entry === true },
   { key: 'TREND_CONFIRMED', label: '趨勢共振', description: '4h MA20 回踩轉強且日線 MA7 向上',
     matches: observation => observation.signal.trendConfirmation?.confirmed === true },

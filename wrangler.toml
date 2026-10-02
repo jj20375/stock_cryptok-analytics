@@ -12,7 +12,7 @@ enabled = true
 WAVE_RADAR_ENABLED = "true"
 # 潛力幣雷達保存觀察，並在虛擬幣即時進場頻道設定齊全時通知新候選；絕不下單。
 POTENTIAL_RADAR_ENABLED = "true"
-# 永續雷達讀取 Gate 免費公開 Mark Price，通知只送虛擬幣即時進場頻道；絕不下單。
+# 永續雷達優先讀 Binance Mark Price，Cloudflare 遭擋時整批切 Gate；通知只送虛擬幣即時進場頻道。
 BINANCE_PERP_RADAR_ENABLED = "true"
 # 美股雷達每 15 分鐘輕量檢查 Yahoo 1h 行情，只在新 4h／收盤段完成時全掃描。
 US_STOCK_RADAR_ENABLED = "true"
@@ -26,9 +26,11 @@ TW_STOCK_RADAR_ENABLED = "true"
 # TradingView Webhook 密鑰：wrangler secret put TRADINGVIEW_WEBHOOK_SECRET
 # （正式環境務必用不同於本機 .dev.vars 的隨機值，外洩即等同任何人都能推送假訊號）
 # TRADINGVIEW_WEBHOOK_SECRET = ""
+# Bitget Demo API 金鑰由登入使用者在設定頁加密保存；不放入 Worker vars，也不與正式盤金鑰共用。
 # 美股獨立 Slack 頻道：沿用 SLACK_API_TOKEN，僅需另設 wrangler secret put US_STOCK_SLACK_CHANNEL_ID
 # 台股即時進場價格頻道：沿用 SLACK_API_TOKEN，另設 wrangler secret put TW_STOCK_SLACK_CHANNEL_ID
 # 虛擬幣即時進場價格頻道：沿用 SLACK_API_TOKEN，另設 wrangler secret put CRYPTO_ENTRY_SLACK_CHANNEL_ID
+# Bitget Demo 永續開多／平多專用頻道：另設 wrangler secret put CRYPTO_FUTURES_TRADE_SLACK_CHANNEL_ID
 
 [[d1_databases]]
 binding = "DB"
@@ -41,10 +43,11 @@ migrations_dir = "drizzle"
 # - 14:00 台北 = 06:00 UTC
 # - 04:30 / 04:45 台北 = 20:30 / 20:45 UTC
 crons = [
-  # 同一條 Cron 以分鐘錯開：+1 掃 Gate、+3 檢查美股、+4 檢查台股，仍只占一個 Cloudflare Trigger。
-  "1,3,4,16,18,19,31,33,34,46,48,49 * * * *",
-  "2,17,32,47 * * * *",
-  # 每五分鐘只消化一則 Gate Slack 佇列；Worker 內仍將策略與波段掃描限制為每 15 分鐘。
+  # 同一條 Cron 以分鐘錯開：+1 至 +4 掃四個永續分片、+5 潛力幣 4 小時吃大魚、+7 美股、+8 台股，仍只占一個 Trigger。
+  "1,2,3,4,5,7,8,16,17,18,19,20,22,23,31,32,33,34,35,37,38,46,47,48,49,50,52,53 * * * *",
+  # 現貨潛力幣在四個永續分片完成後執行，避免同分鐘競爭 Worker 資源。
+  "6,21,36,51 * * * *",
+  # 每五分鐘只消化一則永續 Slack 佇列；Worker 內仍將策略與波段掃描限制為每 15 分鐘。
   "*/5 * * * *",
   "0,15 6 * * *",
   "30,45 20 * * *"

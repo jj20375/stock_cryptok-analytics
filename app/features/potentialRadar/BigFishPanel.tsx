@@ -9,7 +9,8 @@ export function BigFishPanel({ signal }: { signal: RadarSignal }) {
   if (!fish) return <p className="rounded bg-black/5 p-3 text-xs">吃大魚 2.0：此筆尚未計算，等待新版掃描。</p>;
   const blocked = signal.phase === 'EXCLUDED' || signal.phase === 'EXTENDED';
   return <section aria-label="吃大魚策略訊號" className={`rounded-lg border p-3 space-y-2 text-sm ${fish.entry ? 'border-emerald-300 bg-emerald-50 text-emerald-950' : 'border-black/10 bg-black/5'}`}>
-    <p className="font-semibold">吃大魚 2.0 · 15 分線</p>
+    {/* 舊快照沒有 timeframe 欄位，代表升級前以 15 分線計算的結果 */}
+    <p className="font-semibold">吃大魚 2.0 · {fish.timeframe === '4h' ? '4 小時線' : '15 分線（舊版資料）'}</p>
     <p>{bigFishLabel(fish)}</p>
     <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
       <dt>動態防守線（ST）</dt><dd className="text-right">{price(fish.supertrend)} · {fish.direction === -1 ? '綠' : '紅'}</dd>

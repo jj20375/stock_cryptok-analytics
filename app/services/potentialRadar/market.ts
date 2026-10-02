@@ -1,6 +1,6 @@
 /** @file Bybit 現貨公開行情；固定來源、逾時與新鮮度檢查，失敗時不以舊資料冒充訊號。 */
-import { closedSeries } from './analysis';
-import { gateUniverse, gateCandles, gateDepth } from './gateMarket';
+import { closedFourHourSeries, closedSeries } from './analysis';
+import { gateUniverse, gateCandles, gateDepth, gateFourHourCandles } from './gateMarket';
 import { QUARTER_MS, RADAR_RULES, type MarketTicker, type RadarCandle, type RadarDepth } from './types';
 
 /** 第一版限定 Bybit USDT 現貨；穩定幣及槓桿代幣不納入潛力榜。 */
@@ -46,6 +46,21 @@ export async function fetchRadarCandles(symbol: string, cutoff: number, source: 
   const candles = result.list.map(row => ({ openTime: Number(row[0]), open: Number(row[1]), high: Number(row[2]),
     low: Number(row[3]), close: Number(row[4]), volume: Number(row[5]), turnover: Number(row[6]) }));
   return closedSeries(candles, cutoff);
+}
+
+/**
+ * 吃大魚專用的 4 小時 K 線（300 根約 50 天）；與 15 分量價同一現貨來源，不跨所拼接。
+ * 每輪呼叫次數由掃描器的 bigFishFetchLimit 限制，避免超過免費方案的對外請求上限。
+ */
+export async function fetchRadarFourHourCandles(symbol: string, fourHourCutoff: number,
+  source: 'BYBIT_SPOT' | 'GATE_SPOT' = 'BYBIT_SPOT'): Promise<RadarCandle[]> {
+  if (source === 'GATE_SPOT') return gateFourHourCandles(symbol, fourHourCutoff);
+  const result = await publicMarket<{ list: string[][] }>('kline', {
+    symbol, interval: '240', limit: '300', end: String(fourHourCutoff - 1),
+  });
+  const candles = result.list.map(row => ({ openTime: Number(row[0]), open: Number(row[1]), high: Number(row[2]),
+    low: Number(row[3]), close: Number(row[4]), volume: Number(row[5]), turnover: Number(row[6]) }));
+  return closedFourHourSeries(candles, fourHourCutoff);
 }
 
 /** 深度是當下掛單快照；不代表歷史收盤時的深度，也不能保證實際成交。 */

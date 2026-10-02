@@ -3,8 +3,11 @@ import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
 import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
 import { users } from "../db/schema";
+import { cryptoAutoOrders } from "../db/cryptoAutoTradeSchema";
 import { getUserId } from "../utils/auth";
 import { encryptData, decryptData } from "../utils/encryption";
+import { fetchBitgetFuturesMarkPrice } from "../services/bitgetService";
+import { processCryptoDemoSignal } from "../services/cryptoAutoTrading/engine";
 
 const sanitizePercent = (value: FormDataEntryValue | null, fallback: string, min: number, max: number) => {
   const parsed = parseFloat(String(value || ""));
@@ -46,6 +49,8 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   const binanceApiKey = user.binanceApiKey ? "••••••••••••••••" : "";
   const pionexApiKey = user.pionexApiKey ? "••••••••••••••••" : "";
   const bitgetApiKey = user.bitgetApiKey ? "••••••••••••••••" : "";
+  const bitgetDemoApiKey = user.bitgetDemoApiKey ? "••••••••••••••••" : "";
+  const bitgetFuturesLiveApiKey = user.bitgetFuturesLiveApiKey ? "••••••••••••••••" : "";
 
   // 【詳細繁體中文註解】：將使用者自訂的策略時間週期與基本設定帶給前端
   return {
@@ -68,8 +73,17 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     binanceApiKey,
     pionexApiKey,
     bitgetApiKey,
+    bitgetDemoApiKey,
+    bitgetFuturesLiveApiKey,
     preferredExchange: user.preferredExchange || 'BINANCE',
     stockAutoTradingEnabled: user.stockAutoTradingEnabled ?? false,
+    hasBitgetDemo: !!user.bitgetDemoApiKey && !!user.bitgetDemoApiSecret && !!user.bitgetDemoPassphrase,
+    bitgetDemoMaxLeverage: user.bitgetDemoMaxLeverage ?? 1,
+    hasBitgetFuturesLive: !!user.bitgetFuturesLiveApiKey && !!user.bitgetFuturesLiveApiSecret && !!user.bitgetFuturesLivePassphrase,
+    bitgetFuturesExecutionMode: user.bitgetFuturesExecutionMode === 'LIVE' ? 'LIVE' : 'DEMO',
+    bitgetFuturesLiveMaxLeverage: user.bitgetFuturesLiveMaxLeverage ?? 1,
+    tradingviewDemoAutoTradingEnabled: user.tradingviewDemoAutoTradingEnabled ?? false,
+    internalDemoAutoTradingEnabled: user.internalDemoAutoTradingEnabled ?? false,
   };
 }
 
@@ -83,7 +97,57 @@ export async function action({ request, context }: ActionFunctionArgs) {
   const db = drizzle(env.DB);
   const masterKey = env.MASTER_ENCRYPTION_KEY;
 
+  try {
   const formData = await request.formData();
+
+  /**
+   * 【Demo 驗證註解】：只允許目前已選 Demo、已登入的本人按下測試，強制使用
+   * processCryptoDemoSignal，不能因設定表單的其他欄位誤走正式盤。測試仍會在
+   * Bitget Demo 建立真實的模擬委託，故沿用完整風控、稽核與 Slack 通知流程。
+   */
+  if (formData.get("intent") === "testBitgetDemoOrder") {
+    const user = await db.select().from(users).where(eq(users.id, userId)).get();
+    if (!user || user.bitgetFuturesExecutionMode === "LIVE") {
+      return Response.json({ success: false, error: "請先在 Bitget 永續區塊選擇 Demo 模式，再進行連線測試。" }, { status: 400 });
+    }
+    if (!user.bitgetDemoApiKey || !user.bitgetDemoApiSecret || !user.bitgetDemoPassphrase) {
+      return Response.json({ success: false, error: "Demo API Key、Secret 與 Passphrase 必須完整設定。" }, { status: 400 });
+    }
+    if (!user.tradingviewDemoAutoTradingEnabled) {
+      return Response.json({ success: false, error: "請先開啟 TradingView 吃大魚訊號，才可驗證相同的下單流程。" }, { status: 400 });
+    }
+
+    const signalAt = Date.now();
+    const sourceEventId = `settings-demo-connectivity-${signalAt}`;
+    let referencePrice: number;
+    try {
+      referencePrice = await fetchBitgetFuturesMarkPrice("BTCUSDT");
+      await processCryptoDemoSignal(env, {
+        id: sourceEventId,
+        source: "TRADINGVIEW",
+        symbol: "BTCUSDT",
+        action: "BUY",
+        signalAt,
+        referencePrice,
+        label: "設定頁 Demo 連線測試（最小風控多單）",
+      }, userId);
+    } catch (error) {
+      /** 僅回傳行情／連線類型，不把憑證、簽章或完整外部回應交給瀏覽器。 */
+      const message = error instanceof Error ? error.message.replace(/[\r\n]/g, " ").slice(0, 160) : "未知錯誤";
+      return Response.json({ success: false, error: `Demo 測試準備失敗：${message}` }, { status: 502 });
+    }
+    const audit = await db.select().from(cryptoAutoOrders).where(eq(cryptoAutoOrders.sourceEventId, sourceEventId)).get();
+    if (audit?.status === "SUBMITTED") {
+      return Response.json({
+        success: true,
+        message: `Demo 測試已送出：BTCUSDT 參考價 ${referencePrice}，訂單 ${audit.bitgetOrderId || "已建立"}。請到 Dashboard 或 Bitget Demo 核對。`,
+      });
+    }
+    return Response.json({
+      success: false,
+      error: audit?.reason || "測試訊號未建立交易稽核紀錄，請檢查 Demo API 權限與 Bitget 回覆。",
+    }, { status: 400 });
+  }
   
   // 準備要更新的資料物件
   const updateData: any = {};
@@ -157,12 +221,42 @@ export async function action({ request, context }: ActionFunctionArgs) {
     updateData.bitgetPassphrase = await encryptData(bgPassphrase, masterKey);
   }
 
+  // 【安全性註解】：Demo 金鑰不得覆蓋正式 Bitget 金鑰，兩套權限完全分開保存。
+  const bgDemoApiKey = formData.get("bitgetDemoApiKey") as string;
+  const bgDemoApiSecret = formData.get("bitgetDemoApiSecret") as string;
+  const bgDemoPassphrase = formData.get("bitgetDemoPassphrase") as string;
+  if (bgDemoApiKey !== null && bgDemoApiKey !== "••••••••••••••••") {
+    updateData.bitgetDemoApiKey = bgDemoApiKey ? await encryptData(bgDemoApiKey, masterKey) : null;
+  }
+  if (bgDemoApiSecret) updateData.bitgetDemoApiSecret = await encryptData(bgDemoApiSecret, masterKey);
+  if (bgDemoPassphrase) updateData.bitgetDemoPassphrase = await encryptData(bgDemoPassphrase, masterKey);
+
+  // 【安全性註解】：正式合約金鑰獨立加密保存，不得沿用上方 Bitget 現貨／股票代幣金鑰。
+  const bgFuturesLiveApiKey = formData.get("bitgetFuturesLiveApiKey") as string;
+  const bgFuturesLiveApiSecret = formData.get("bitgetFuturesLiveApiSecret") as string;
+  const bgFuturesLivePassphrase = formData.get("bitgetFuturesLivePassphrase") as string;
+  if (bgFuturesLiveApiKey !== null && bgFuturesLiveApiKey !== "••••••••••••••••") {
+    updateData.bitgetFuturesLiveApiKey = bgFuturesLiveApiKey ? await encryptData(bgFuturesLiveApiKey, masterKey) : null;
+  }
+  if (bgFuturesLiveApiSecret) updateData.bitgetFuturesLiveApiSecret = await encryptData(bgFuturesLiveApiSecret, masterKey);
+  if (bgFuturesLivePassphrase) updateData.bitgetFuturesLivePassphrase = await encryptData(bgFuturesLivePassphrase, masterKey);
+
+  const futuresExecutionMode = formData.get("bitgetFuturesExecutionMode") as string;
+  if (futuresExecutionMode === "DEMO" || futuresExecutionMode === "LIVE") {
+    updateData.bitgetFuturesExecutionMode = futuresExecutionMode;
+  }
+
   const preferredExchange = formData.get("preferredExchange") as string;
   if (preferredExchange === "BINANCE" || preferredExchange === "BITGET") {
     updateData.preferredExchange = preferredExchange;
   }
 
   updateData.stockAutoTradingEnabled = formData.get("stockAutoTradingEnabled") === "on";
+  updateData.tradingviewDemoAutoTradingEnabled = formData.get("tradingviewDemoAutoTradingEnabled") === "on";
+  updateData.internalDemoAutoTradingEnabled = formData.get("internalDemoAutoTradingEnabled") === "on";
+  // 【風控註解】：前端輸入不可直接信任；伺服器將槓桿上限限制為整數 1 至 50。
+  updateData.bitgetDemoMaxLeverage = sanitizeInteger(formData.get("bitgetDemoMaxLeverage"), 1, 1, 50);
+  updateData.bitgetFuturesLiveMaxLeverage = sanitizeInteger(formData.get("bitgetFuturesLiveMaxLeverage"), 1, 1, 50);
 
   // 如果有資料要更新
   if (Object.keys(updateData).length > 0) {
@@ -171,13 +265,24 @@ export async function action({ request, context }: ActionFunctionArgs) {
   }
 
   return { success: false, message: "沒有任何變更" };
+  } catch (error) {
+    /**
+     * 設定表單可能包含交易所 Secret 與 Passphrase；D1 例外的查詢參數可能回顯表單內容，
+     * 因此僅在伺服器保留錯誤種類，前端一律收到通用訊息，避免金鑰與資料庫結構外洩。
+     */
+    console.error('設定儲存失敗', {
+      userId,
+      errorType: error instanceof Error ? error.name : 'UnknownError',
+    });
+    return { success: false, message: "設定暫時無法儲存，請重新整理後再試。" };
+  }
 }
 
 import { AppLayout } from "../components/AppLayout";
 
 export default function SettingsRoute() {
   const data = useLoaderData<typeof loader>();
-  const actionData = useActionData<{ success?: boolean; message?: string }>();
+  const actionData = useActionData<{ success?: boolean; message?: string; error?: string }>();
   const navigation = useNavigation();
   const submit = useSubmit();
   const isSubmitting = navigation.state === "submitting";
@@ -199,9 +304,9 @@ export default function SettingsRoute() {
             </Form>
           </header>
 
-          {actionData?.message && (
+          {(actionData?.message || actionData?.error) && (
             <div className={`p-4 rounded-sm border ${actionData.success ? 'bg-green-50 border-green-600 text-green-800' : 'bg-red-50 border-red-600 text-red-800'}`}>
-              {actionData.message}
+              {actionData.message || actionData.error}
             </div>
           )}
 
@@ -592,6 +697,81 @@ export default function SettingsRoute() {
                   />
                 </div>
               </div>
+            </div>
+
+            {/* Bitget 合約：Demo 與 LIVE 憑證完全分離，模式切換不會搬用另一組金鑰。 */}
+            <div className="bg-sky-50 p-6 rounded-sm border border-sky-700">
+              <h2 className="text-xl font-bold text-[#141414] mb-3 flex items-center justify-between flex-wrap gap-2">
+                <span>Bitget USDT 永續自動交易</span>
+                <span className="flex gap-2">
+                  {data.hasBitgetDemo && <span className="px-2 py-1 text-xs bg-green-100 text-green-800 border border-green-600 rounded-sm">Demo 已綁定</span>}
+                  {data.hasBitgetFuturesLive && <span className="px-2 py-1 text-xs bg-red-100 text-red-800 border border-red-600 rounded-sm">正式合約已綁定</span>}
+                </span>
+              </h2>
+              <p className="text-sm text-gray-700 mb-4 leading-relaxed">
+                此功能只做 USDT 永續合約多單，固定逐倉。單筆風險最多 0.25%、部位最多本金 5%；
+                出場只會平多。Demo 與正式盤使用不同金鑰，正式盤還必須開啟上方「允許 LIVE 真實下單」。
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-5">
+                {(['DEMO', 'LIVE'] as const).map(mode => (
+                  <label key={mode} className={`p-4 border rounded-sm cursor-pointer ${data.bitgetFuturesExecutionMode === mode ? (mode === 'LIVE' ? 'border-red-700 bg-red-50' : 'border-sky-700 bg-white') : 'border-gray-300 bg-gray-50'}`}>
+                    <input type="radio" name="bitgetFuturesExecutionMode" value={mode}
+                      defaultChecked={data.bitgetFuturesExecutionMode === mode} onChange={(e) => submit(e.currentTarget.form)} className="mr-2" />
+                    <strong>{mode === 'LIVE' ? '⚠️ 正式盤 LIVE' : '🧪 模擬盤 DEMO'}</strong>
+                  </label>
+                ))}
+              </div>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <fieldset className="grid gap-3 p-4 border border-sky-700 bg-white rounded-sm">
+                  <legend className="px-2 font-bold">Demo 專用憑證</legend>
+                  <input type="text" name="bitgetDemoApiKey" defaultValue={data.bitgetDemoApiKey} className="w-full px-4 py-2 border border-sky-700 rounded-sm" placeholder="Demo API Key" />
+                  <input type="password" name="bitgetDemoApiSecret" className="w-full px-4 py-2 border border-sky-700 rounded-sm" placeholder={data.hasBitgetDemo ? "Demo Secret 已隱藏；不變更請留空" : "Demo Secret Key"} />
+                  <input type="password" name="bitgetDemoPassphrase" className="w-full px-4 py-2 border border-sky-700 rounded-sm" placeholder={data.hasBitgetDemo ? "Demo Passphrase 已隱藏；不變更請留空" : "Demo Passphrase"} />
+                  <label className="grid gap-1 text-sm font-bold">槓桿上限
+                    <input type="number" name="bitgetDemoMaxLeverage" min="1" max="50" step="1" defaultValue={data.bitgetDemoMaxLeverage} className="w-full px-4 py-2 border border-sky-700 rounded-sm" />
+                  </label>
+                </fieldset>
+                <fieldset className="grid gap-3 p-4 border border-red-700 bg-red-50 rounded-sm">
+                  <legend className="px-2 font-bold text-red-900">正式合約專用憑證</legend>
+                  <input type="text" name="bitgetFuturesLiveApiKey" defaultValue={data.bitgetFuturesLiveApiKey} className="w-full px-4 py-2 bg-white border border-red-700 rounded-sm" placeholder="正式合約 API Key" />
+                  <input type="password" name="bitgetFuturesLiveApiSecret" className="w-full px-4 py-2 bg-white border border-red-700 rounded-sm" placeholder={data.hasBitgetFuturesLive ? "正式 Secret 已隱藏；不變更請留空" : "正式合約 Secret Key"} />
+                  <input type="password" name="bitgetFuturesLivePassphrase" className="w-full px-4 py-2 bg-white border border-red-700 rounded-sm" placeholder={data.hasBitgetFuturesLive ? "正式 Passphrase 已隱藏；不變更請留空" : "正式合約 Passphrase"} />
+                  <label className="grid gap-1 text-sm font-bold text-red-900">槓桿上限
+                    <input type="number" name="bitgetFuturesLiveMaxLeverage" min="1" max="50" step="1" defaultValue={data.bitgetFuturesLiveMaxLeverage} className="w-full px-4 py-2 bg-white border border-red-700 rounded-sm" />
+                  </label>
+                  <small className="text-red-800">API 權限只開 Read／Trade，請勿開啟提領。若執行環境有固定出口 IP，再於 Bitget 啟用 IP 白名單；一般 Cloudflare Workers 預設沒有專用固定出口 IP。</small>
+                </fieldset>
+              </div>
+              <div className="mt-5 space-y-3">
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input type="checkbox" name="tradingviewDemoAutoTradingEnabled"
+                    defaultChecked={data.tradingviewDemoAutoTradingEnabled} className="mt-1 h-4 w-4" />
+                  <span><strong>TradingView 吃大魚訊號</strong><br /><small className="text-gray-600">只接受 30 分鐘內、價格與方向完整的 Webhook。</small></span>
+                </label>
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input type="checkbox" name="internalDemoAutoTradingEnabled"
+                    defaultChecked={data.internalDemoAutoTradingEnabled} className="mt-1 h-4 w-4" />
+                  <span><strong>系統自己的吃大魚訊號</strong><br /><small className="text-gray-600">最佳型與 Supertrend 翻綠才開倉；MACD 提早型只通知。</small></span>
+                </label>
+              </div>
+              <p className="mt-4 text-xs text-amber-800">關閉訊號或 LIVE 授權只停止新開倉；既有多單仍保留 Bitget 原生停損與每五分鐘備援檢查。</p>
+              <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-sky-200 pt-4">
+                <button
+                  type="submit"
+                  name="intent"
+                  value="testBitgetDemoOrder"
+                  disabled={isTesting || data.bitgetFuturesExecutionMode !== 'DEMO' || !data.hasBitgetDemo || !data.tradingviewDemoAutoTradingEnabled}
+                  className="px-4 py-2 bg-sky-700 text-white font-bold rounded-sm disabled:bg-gray-400 disabled:cursor-not-allowed"
+                >
+                  {isTesting ? 'Demo 測試送出中…' : '送出 1 筆 Demo 連線測試'}
+                </button>
+                <span className="text-xs text-gray-700">BTCUSDT、最小風控多單；強制使用 Demo，不會建立正式盤訂單。</span>
+              </div>
+              {testResult && (
+                <p className={`mt-3 text-sm font-bold ${testResult.success ? 'text-green-700' : 'text-red-700'}`}>
+                  {testResult.success ? testResult.message : testResult.error}
+                </p>
+              )}
             </div>
 
             {/* 美股代幣自動交易設定區塊 */}
