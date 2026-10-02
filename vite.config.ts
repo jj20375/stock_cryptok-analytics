@@ -16,7 +16,6 @@ export default defineConfig(({mode}) => {
     } }), localRadars.plugin, reactRouter(), tailwindcss()],
     define: {
       'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
-      'process.env.TWELVE_DATA_API_KEY': JSON.stringify(env.TWELVE_DATA_API_KEY || 'd3dc21e6cdba4e3a89f0c7620d6206c4'),
     },
     resolve: {
       alias: {

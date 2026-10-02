@@ -20,7 +20,6 @@ US_STOCK_RADAR_ENABLED = "true"
 TW_STOCK_RADAR_ENABLED = "true"
 # 機密變數已移至 .dev.vars，正式上線請透過 wrangler secret put 設定
 # GEMINI_API_KEY = ""
-# TWELVE_DATA_API_KEY = ""
 # MASTER_ENCRYPTION_KEY = ""
 # INVITATION_CODE = ""
 # TradingView Webhook 密鑰：wrangler secret put TRADINGVIEW_WEBHOOK_SECRET

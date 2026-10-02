@@ -26,8 +26,6 @@ description: 詳述本專案 (us-tw-crypto-analytics-2) 的技術架構、引用
 - **TWSE API (台灣證券交易所)**：
   - 用途：取得台股每日收盤行情、成交量排名及前 50 大股票清單。
   - 端點：`https://www.twse.com.tw/exchangeReport/MI_INDEX?response=json&type=ALL`。
-- **Twelve Data (備用)**：
-  - 已配置 `TWELVE_DATA_API_KEY`，可隨時啟用以取得全球金融資料。
 
 ### ₿ 加密貨幣 (Crypto Data & Trading)
 
