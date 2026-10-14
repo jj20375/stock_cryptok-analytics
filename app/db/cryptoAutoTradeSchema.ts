@@ -5,6 +5,11 @@ export const cryptoAutoOrders = sqliteTable('crypto_auto_orders', {
   /** 同一使用者與同一來源事件共用固定 ID，Cloudflare 重試也不會重複下單。 */
   id: text('id').primaryKey(),
   userId: integer('user_id').notNull(),
+  /** 下單當時固定帳戶與策略快照；金鑰輪替後不得把舊部位送往新帳戶。 */
+  ledgerAccountId: text('ledger_account_id'),
+  paperTradeId: integer('paper_trade_id'),
+  requestedQuantity: text('requested_quantity'),
+  strategySnapshotJson: text('strategy_snapshot_json'),
   source: text('source').notNull(),
   sourceEventId: text('source_event_id').notNull(),
   symbol: text('symbol').notNull(),

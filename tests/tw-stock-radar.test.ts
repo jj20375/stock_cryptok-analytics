@@ -84,3 +84,14 @@ test('台股卡片顯示新台幣與 0050，且頻道不 fallback 到其他 Slac
   assert.equal(twStockSlackChannel({ DB: {} as any, SLACK_API_TOKEN: 'token' } as any), null);
   assert.equal(twStockSlackChannel({ DB: {} as any, TW_STOCK_SLACK_CHANNEL_ID: ' C-TW ' } as any), 'C-TW');
 });
+
+
+test('台股過期或未收盤事件不通知，同根只送一次', () => {
+  const signal = analyzeTwStock(intradayFixture(), dailyFixture(true), intradayFixture(100), dailyFixture(true));
+  const snapshot: TwStockSnapshot = { symbol: '2330.TW', name: '台積電', checkedAt: signal.closedAt + 8 * 60_000, signal, error: null };
+  assert.equal(signal.bigFish.timeframe, '4h');
+  assert.equal(selectTwStockNotice(snapshot, null), 'BIG_FISH');
+  assert.equal(selectTwStockNotice(snapshot, snapshot), null);
+  assert.equal(selectTwStockNotice({ ...snapshot, checkedAt: signal.closedAt - 1 }, null), null);
+  assert.equal(selectTwStockNotice({ ...snapshot, checkedAt: signal.closedAt + 35 * 60_000 }, null), null);
+});

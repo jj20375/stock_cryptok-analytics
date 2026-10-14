@@ -1,10 +1,10 @@
+/** @component 首頁行情與操作協調；策略重放由專用 Hook 處理，圖表顯示與交易副作用分離。 */
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Chart, dispose, init } from 'klinecharts';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useRouteLoaderData } from "react-router";
 import { AppLayout } from '../components/AppLayout';
 import {
@@ -22,35 +22,15 @@ import { LeftSidebar } from '../features/home/components/LeftSidebar';
 import { MainChartPanel } from '../features/home/components/MainChartPanel';
 import { MarketHotPicks } from '../features/home/components/MarketHotPicks';
 import { STOCKS } from '../features/home/constants/markets';
-import {
-  STRATEGY_OVERLAY_GROUP_ID,
-  buildStrategyLayers,
-  filterStrategyLayersByVisibleData,
-} from '../features/home/strategy-overlays';
+import { useStrategyLayers } from '../features/home/use-strategy-layers';
 import type {
   AIStrategy,
-  IndicatorVisibility,
   MarketKey,
   PortfolioStock,
   ScanResult,
   ScanStrategy,
   StockOption,
-  StrategyOverlayId,
-  StrategyOverlayLayer,
 } from '../features/home/types';
-
-const DEFAULT_INDICATORS: IndicatorVisibility = {
-  ma5: true,
-  ma10: true,
-  ma20: true,
-  ma60: true,
-  ma120: true,
-  ema: true,
-  volume: true,
-  kd: true,
-  macd: true,
-  rsi: true,
-};
 
 const filterDataByTimeRange = (
   data: StockDataPoint[],
@@ -66,6 +46,8 @@ const filterDataByTimeRange = (
   let daysToSubtract = 500;
 
   switch (timeRange) {
+    /** 全部只顯示已取得的來源資料，不額外補上不同市場或模擬行情。 */
+    case 'ALL': return data;
     case '1D': daysToSubtract = 1; break;
     case '1W': daysToSubtract = 7; break;
     case '1M': daysToSubtract = 30; break;
@@ -97,7 +79,6 @@ export default function App() {
   const [isGeneratingStrategy, setIsGeneratingStrategy] = useState(false);
   const [scanStrategy, setScanStrategy] = useState<ScanStrategy>('trend');
   const [scanTimeframe, setScanTimeframe] = useState<Timeframe>('1d');
-  const [enabledStrategyLayers, setEnabledStrategyLayers] = useState<StrategyOverlayId[]>(['big_fish', 'extreme_reversal']);
   const [portfolio, setPortfolio] = useState<PortfolioStock[]>([]);
   const [isAnalyzingPortfolio, setIsAnalyzingPortfolio] = useState<string | null>(null);
   const [analysisResult, setAnalysisResult] = useState<any>(null);
@@ -105,11 +86,8 @@ export default function App() {
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [timeRange, setTimeRange] = useState('3M');
   const [timeframe, setTimeframe] = useState<Timeframe>('1d');
-  const [showIndicators, setShowIndicators] = useState<IndicatorVisibility>(DEFAULT_INDICATORS);
 
   const hotPicksRef = useRef<HTMLDivElement>(null);
-  const chartContainerRef = useRef<HTMLDivElement>(null);
-  const chartInstance = useRef<Chart | null>(null);
   const rootData = useRouteLoaderData<{ user: { id: number, email: string } | null }>("root");
   const user = rootData?.user;
 
@@ -251,7 +229,7 @@ export default function App() {
     setAiStrategy(null);
   }, [selectedStock.symbol]);
 
-  const handleSearch = (event: React.FormEvent) => {
+  const handleSearch = (event: FormEvent) => {
     event.preventDefault();
     if (!searchQuery) return;
 
@@ -468,10 +446,6 @@ export default function App() {
     setScanProgress(0);
   };
 
-  const toggleIndicator = (key: keyof IndicatorVisibility) => {
-    setShowIndicators(prev => ({ ...prev, [key]: !prev[key] }));
-  };
-
   const refreshData = () => {
     setLoading(true);
     fetchStockData(selectedStock.symbol, 500, timeframe).then(({ data: newData, name }) => {
@@ -491,19 +465,8 @@ export default function App() {
     () => filterDataByTimeRange(data, timeRange, timeframe),
     [data, timeRange, timeframe]
   );
-  const allStrategyLayers = useMemo(() => buildStrategyLayers(data), [data]);
-  const strategyLayers = useMemo(
-    () => filterStrategyLayersByVisibleData(allStrategyLayers, filteredData),
-    [allStrategyLayers, filteredData]
-  );
-  const activeStrategyLayers = useMemo(
-    () => strategyLayers.filter(layer => enabledStrategyLayers.includes(layer.strategyId)),
-    [strategyLayers, enabledStrategyLayers]
-  );
-  const activeStrategySignalCount = activeStrategyLayers.reduce((sum, layer) => sum + layer.events.length, 0);
-  const totalStrategySignalCount = allStrategyLayers
-    .filter(layer => enabledStrategyLayers.includes(layer.strategyId))
-    .reduce((sum, layer) => sum + layer.events.length, 0);
+  const { allStrategyLayers, strategyLayers, enabledStrategyLayers, setEnabledStrategyLayers,
+    activeStrategySignalCount, totalStrategySignalCount, toggleStrategyLayer } = useStrategyLayers(data, filteredData, market, timeframe);
 
   const signal = useMemo(() => getTradingSignal(data), [data]);
   const currentPrice = data.length > 0 ? data[data.length - 1].close : 0;
@@ -514,249 +477,6 @@ export default function App() {
   const latestEmaShort = data.length > 0 ? data[data.length - 1].emaShort : 0;
   const latestEmaLong = data.length > 0 ? data[data.length - 1].emaLong : 0;
   const latestData = data.length > 0 ? data[data.length - 1] : null;
-
-  const toggleStrategyLayer = (strategyId: StrategyOverlayId) => {
-    setEnabledStrategyLayers(prev => {
-      if (prev.includes(strategyId)) {
-        return prev.filter(id => id !== strategyId);
-      }
-      return [...prev, strategyId];
-    });
-  };
-
-  const renderStrategyOverlays = (layers: StrategyOverlayLayer[]) => {
-    const chart = chartInstance.current;
-    if (!chart) return;
-
-    try {
-      chart.removeOverlay({ groupId: STRATEGY_OVERLAY_GROUP_ID });
-
-      const eventOverlays = layers.flatMap(layer => layer.events.map(event => {
-        const eventColor = event.color ?? layer.color;
-
-        return {
-          name: 'simpleAnnotation',
-          groupId: STRATEGY_OVERLAY_GROUP_ID,
-          lock: true,
-          visible: true,
-          zLevel: 20,
-          points: [{ timestamp: event.timestamp, value: event.price }],
-          extendData: `${event.icon} ${event.label}`,
-          styles: {
-            line: { color: eventColor, size: 2, style: 'solid' },
-            polygon: { color: eventColor, borderColor: eventColor, borderSize: 1, style: 'fill' },
-            text: {
-              color: '#ffffff',
-              size: 10,
-              family: 'monospace',
-              weight: 700,
-              backgroundColor: eventColor,
-              borderColor: eventColor,
-              borderSize: 1,
-              borderRadius: 2,
-              paddingLeft: 4,
-              paddingRight: 4,
-              paddingTop: 2,
-              paddingBottom: 2,
-            },
-          },
-        };
-      }));
-
-      const lineOverlays = layers.flatMap(layer => layer.lines.map(line => ({
-        name: 'segment',
-        groupId: STRATEGY_OVERLAY_GROUP_ID,
-        lock: true,
-        visible: true,
-        zLevel: 8,
-        points: [
-          { timestamp: line.fromTimestamp, value: line.fromPrice },
-          { timestamp: line.toTimestamp, value: line.toPrice },
-        ],
-        styles: {
-          line: {
-            color: line.color,
-            size: line.label === '牛熊生命線' ? 1 : 2,
-            style: 'solid',
-          },
-        },
-      })));
-
-      const overlays = [...lineOverlays, ...eventOverlays];
-      if (overlays.length > 0) chart.createOverlay(overlays as any, 'main');
-    } catch (error) {
-      console.error('Error rendering strategy overlays:', error);
-    }
-  };
-
-  const applyChartData = (chartData: StockDataPoint[]) => {
-    const chart = chartInstance.current;
-    if (!chart) return;
-
-    if (chartData.length === 0) {
-      try {
-        if (typeof (chart as any).applyNewData === 'function') {
-          (chart as any).applyNewData([]);
-        } else if (typeof (chart as any).applyData === 'function') {
-          (chart as any).applyData([]);
-        }
-      } catch (err) {
-        console.error('Error clearing chart data:', err);
-      }
-      return;
-    }
-
-    const formattedData = [...chartData]
-      .filter(item => item && !isNaN(item.timestamp) && !isNaN(item.close))
-      .sort((a, b) => a.timestamp - b.timestamp)
-      .map(item => ({
-        timestamp: item.timestamp,
-        open: item.open,
-        high: item.high,
-        low: item.low,
-        close: item.close,
-        volume: item.volume,
-        rsi: item.rsi,
-        macdHist: item.macdHist,
-        k: item.k,
-        d: item.d
-      }));
-
-    try {
-      if (typeof (chart as any).applyNewData === 'function') {
-        (chart as any).applyNewData(formattedData);
-      } else if (typeof (chart as any).applyData === 'function') {
-        (chart as any).applyData(formattedData);
-      }
-      chart.resize();
-    } catch (err) {
-      console.error('Error applying chart data:', err);
-    }
-  };
-
-  const updateIndicators = () => {
-    const chart = chartInstance.current;
-    if (!chart) return;
-
-    try {
-      const maParams: number[] = [];
-      if (showIndicators.ma5) maParams.push(5);
-      if (showIndicators.ma10) maParams.push(10);
-      if (showIndicators.ma20) maParams.push(20);
-      if (showIndicators.ma60) maParams.push(60);
-      if (showIndicators.ma120) maParams.push(120);
-
-      if (maParams.length > 0) {
-        chart.createIndicator({ name: 'MA', calcParams: maParams }, false, { id: 'main' });
-      } else {
-        chart.removeIndicator('main', 'MA');
-      }
-
-      if (showIndicators.ema) {
-        chart.createIndicator({ name: 'EMA', calcParams: [12, 26] }, false, { id: 'main' });
-      } else {
-        chart.removeIndicator('main', 'EMA');
-      }
-
-      const manageSubPane = (name: string, show: boolean, paneId: string) => {
-        if (show) {
-          chart.createIndicator(name, false, { id: paneId });
-          // 副圖維持可讀但縮小固定高度，避免 MACD／RSI／KDJ 同時開啟時擠壓主 K 線。
-          chart.setPaneOptions({ id: paneId, height: 88, minHeight: 56 });
-        } else {
-          chart.removeIndicator(paneId, name);
-        }
-      };
-
-      manageSubPane('VOL', showIndicators.volume, 'pane_vol');
-      manageSubPane('MACD', showIndicators.macd, 'pane_macd');
-      manageSubPane('RSI', showIndicators.rsi, 'pane_rsi');
-      manageSubPane('KDJ', showIndicators.kd, 'pane_kdj');
-      // 主窗格至少保留 380px；容器增加的高度會自然優先留給 K 線與均線。
-      chart.setPaneOptions({ id: 'main', height: 460, minHeight: 380 });
-
-      setTimeout(() => chart.resize(), 10);
-      setTimeout(() => chart.resize(), 100);
-      setTimeout(() => chart.resize(), 300);
-    } catch (error) {
-      console.error('Error updating indicators:', error);
-    }
-  };
-
-  useEffect(() => {
-    if (!chartContainerRef.current) return;
-
-    let timeoutId: ReturnType<typeof setTimeout> | undefined;
-    let rafId: number;
-    const chart = init(chartContainerRef.current);
-    chartInstance.current = chart;
-
-    chart.setStyles({
-      grid: {
-        horizontal: { show: true, color: '#ededed' },
-        vertical: { show: false }
-      },
-      candle: {
-        type: 'candle_solid' as any,
-        bar: {
-          upColor: '#ef4444',
-          downColor: '#22c55e',
-          noChangeColor: '#888888'
-        },
-        tooltip: {
-          showRule: 'always' as any,
-          showType: 'standard' as any
-        }
-      },
-      indicator: {
-        tooltip: {
-          showRule: 'always' as any,
-          showType: 'standard' as any
-        }
-      }
-    });
-
-    if (filteredData.length > 0) {
-      applyChartData(filteredData);
-      timeoutId = setTimeout(() => {
-        if (chartInstance.current) {
-          updateIndicators();
-          renderStrategyOverlays(activeStrategyLayers);
-        }
-      }, 50);
-    }
-
-    const resizeObserver = new ResizeObserver(() => {
-      rafId = window.requestAnimationFrame(() => {
-        chartInstance.current?.resize();
-      });
-    });
-    resizeObserver.observe(chartContainerRef.current);
-
-    return () => {
-      if (timeoutId) clearTimeout(timeoutId);
-      if (rafId) window.cancelAnimationFrame(rafId);
-      resizeObserver.disconnect();
-      if (chartContainerRef.current) dispose(chartContainerRef.current);
-      chartInstance.current = null;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (chartInstance.current && filteredData.length > 0) {
-      applyChartData(filteredData);
-      updateIndicators();
-      renderStrategyOverlays(activeStrategyLayers);
-    }
-  }, [filteredData]);
-
-  useEffect(() => {
-    if (chartInstance.current) updateIndicators();
-  }, [showIndicators]);
-
-  useEffect(() => {
-    if (chartInstance.current) renderStrategyOverlays(activeStrategyLayers);
-  }, [activeStrategyLayers]);
 
   return (
     <AppLayout>
@@ -824,6 +544,7 @@ export default function App() {
             onScanTimeframeChange={setScanTimeframe}
           />
           <MainChartPanel
+            market={market}
             selectedStock={selectedStock}
             user={user}
             portfolio={portfolio}
@@ -833,20 +554,18 @@ export default function App() {
             priceChange={priceChange}
             priceChangePercent={priceChangePercent}
             filteredData={filteredData}
+            allData={data}
             loading={loading}
             isAiAnalyzing={isAiAnalyzing}
             timeframe={timeframe}
             timeRange={timeRange}
-            showIndicators={showIndicators}
             strategyLayers={strategyLayers}
             allStrategyLayers={allStrategyLayers}
             enabledStrategyLayers={enabledStrategyLayers}
             activeStrategySignalCount={activeStrategySignalCount}
             totalStrategySignalCount={totalStrategySignalCount}
-            chartContainerRef={chartContainerRef}
             onTimeframeChange={setTimeframe}
             onTimeRangeChange={setTimeRange}
-            onToggleIndicator={toggleIndicator}
             onToggleStrategyLayer={toggleStrategyLayer}
             onSetEnabledStrategyLayers={setEnabledStrategyLayers}
             onAddToPortfolio={addToPortfolio}

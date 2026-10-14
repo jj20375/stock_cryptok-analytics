@@ -1,3 +1,4 @@
+/** @file 回測 UI 與 API 共用資料形狀；成交限制及賣出稅率隨研究任務保存。 */
 /**
  * 【詳細繁體中文註解】：回測前端型別定義
  * 與後端 api.backtest.ts 的回應結構一一對應。
@@ -10,7 +11,10 @@ export interface StrategyMeta {
   description: string;
   markets: ('CRYPTO' | 'US' | 'TW')[];
   supportedIntervals: string[];
+  requiresNextOpen?: boolean;
   supportsShort: boolean;
+  futuresOnly?: boolean;
+  backtestOnly?: boolean;
   defaultParams: Record<string, number>;
   paramMeta: {
     key: string;
@@ -42,6 +46,7 @@ export interface BacktestResult {
   avgHoldingBars: number;
   totalFees: number;
   durationDays: number;
+  futures?: ReturnType<typeof import('../../services/cryptoFutures/evaluation').buildFuturesEvaluation>;
 }
 
 /** 權益曲線單點 */
@@ -129,9 +134,11 @@ export interface BacktestFormValues {
   initialCapital: number;
   /** 手續費率 %(UI 以百分比呈現,送出時除以 100) */
   feeRatePct: number;
+  sellTaxRatePct: number;
   slippageBps: number;
   fillMode: 'nextOpen' | 'close';
   maxRiskPerTradePct: number;
   maxPositionSizePct: number;
   strategyParams: Record<string, number>;
+  futures?: { instrument: 'BITGET_USDT_PERP' | 'BYBIT_USDT_PERP'; leverage: number; direction: 'BOTH' | 'LONG' | 'SHORT' };
 }

@@ -1,3 +1,4 @@
+/** @file 回測資料準備及 D1 結果落地；策略暖機依最終參數計算，副作用只由協調層處理。 */
 /**
  * 【詳細繁體中文註解】：回測協調層(runner)
  *
@@ -12,7 +13,7 @@
  */
 
 import { drizzle } from 'drizzle-orm/d1';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { backtests, backtestTrades } from '../../db/schema';
 import { getStrategy } from '../strategy/registry';
 import { fetchBinanceRange, intervalToMs, type CryptoKlineSource } from '../marketData/binanceHistory';
@@ -21,6 +22,8 @@ import { clearCryptoKlineSeries, findGaps, getKlineRange, upsertKlines, type Mar
 import { runBacktestEngine, type EngineConfig, type FillMode } from './engine';
 import { computeMetrics, downsampleEquityCurve } from './metrics';
 import { validateWaveCandles } from '../waveRadar/state';
+import { prepareFuturesResearch, readFuturesResearch, type FuturesResearchSettings } from '../cryptoFutures/research.server';
+import { buildFuturesEvaluation } from '../cryptoFutures/evaluation';
 
 type D1Db = ReturnType<typeof drizzle>;
 
@@ -42,6 +45,8 @@ export interface BacktestRunParams {
   strategyParams: Record<string, number>;
   /** 手續費率(0.001 = 0.1%) */
   feeRate: number;
+  /** 可調 SELL 稅率；舊 params_json 沒有此欄時不改寫原成本假設。 */
+  sellTaxRate?: number;
   /** 滑價基點 */
   slippageBps: number;
   fillMode: FillMode;
@@ -61,6 +66,7 @@ export interface BacktestRunParams {
    * 造成同一份回測資料混入不同交易所的價格與成交量。
    */
   klineSource?: CryptoKlineSource;
+  futures?: FuturesResearchSettings;
 }
 
 /** 暖機資料的往前抓取範圍:暖機根數 × 週期 × 2 倍裕度(美股遇週末假日仍足夠) */
@@ -84,13 +90,21 @@ export const prepareBacktestData = async (db: D1Db, backtestId: number): Promise
   const strategy = getStrategy(row.strategyId);
   if (!strategy) throw new Error(`未註冊的策略: ${row.strategyId}`);
 
+  const futuresParams = JSON.parse(row.paramsJson) as BacktestRunParams;
+  if (futuresParams.futures) {
+    try { return await prepareFuturesResearch(db, row, futuresParams); }
+    catch (error) { if (row.status !== 'RUNNING') await db.update(backtests).set({ status: 'ERROR', error: (error as Error).message }).where(eq(backtests.id, backtestId)); throw error; }
+  }
+
   const wasPreparing = row.status === 'PREPARING';
   await db.update(backtests).set({ status: 'PREPARING' }).where(eq(backtests.id, backtestId));
 
   try {
     const market = row.market as MarketType;
     const intervalMs = intervalToMs(row.interval);
-    const fetchStart = row.startTime - warmupPadMs(strategy.warmupBars, intervalMs);
+    const savedParams = (JSON.parse(row.paramsJson) as BacktestRunParams).strategyParams;
+    const warmupBars = strategy.warmupBarsForParams?.(savedParams) ?? strategy.warmupBars;
+    const fetchStart = row.startTime - warmupPadMs(warmupBars, intervalMs);
     // 終點不可超過現在(未來的 K 線不存在)
     /** 加密市場僅補到最新已收盤格，避免每次輪詢都重新要求仍未收盤的尾端。 */
     const fetchEnd = market === 'CRYPTO'
@@ -178,40 +192,52 @@ export const runBacktest = async (db: D1Db, backtestId: number): Promise<void> =
   const strategy = getStrategy(row.strategyId);
   if (!strategy) throw new Error(`未註冊的策略: ${row.strategyId}`);
 
-  await db.update(backtests).set({ status: 'RUNNING' }).where(eq(backtests.id, backtestId));
+  if ((JSON.parse(row.paramsJson) as BacktestRunParams).futures) {
+    /** 同一合約研究只能由一個計算者覆寫交易明細，避免並行重跑產生重複成交。 */
+    // ponytail: 計算 Worker 中斷後以新任務重跑；需要同任務續算時再加入租約。
+    if (row.status === 'RUNNING') throw new Error('此合約研究正在計算');
+    const claimed = await db.update(backtests).set({ status: 'RUNNING' }).where(and(eq(backtests.id, backtestId),
+      eq(backtests.status, row.status), eq(backtests.paramsJson, row.paramsJson))).returning({ id: backtests.id }).get();
+    if (!claimed) throw new Error('此合約研究已由另一個請求接手');
+  } else await db.update(backtests).set({ status: 'RUNNING' }).where(eq(backtests.id, backtestId));
 
   try {
     const params = JSON.parse(row.paramsJson) as BacktestRunParams;
     const intervalMs = intervalToMs(row.interval);
-    const fetchStart = row.startTime - warmupPadMs(strategy.warmupBars, intervalMs);
+    const warmupBars = strategy.warmupBarsForParams?.(params.strategyParams) ?? strategy.warmupBars;
+    const fetchStart = row.startTime - warmupPadMs(warmupBars, intervalMs);
     const fetchEnd = Math.min(row.endTime, Date.now());
 
-    const candles = await getKlineRange(db, row.symbol, row.interval, fetchStart, fetchEnd);
-    if (candles.length < strategy.warmupBars + 10) {
+    const futuresData = params.futures ? await readFuturesResearch(db, row.symbol, row.startTime, row.endTime, params.futures) : null;
+    const candles = futuresData?.candles ?? await getKlineRange(db, row.symbol, row.interval, fetchStart, fetchEnd);
+    if (candles.length < warmupBars + 10) {
       throw new Error(
-        `資料不足:僅 ${candles.length} 根 K 線,策略暖機需 ${strategy.warmupBars} 根。請縮短暖機或確認標的上市時間。`
+        `資料不足:僅 ${candles.length} 根 K 線,策略暖機需 ${warmupBars} 根。請縮短暖機或確認標的上市時間。`
       );
     }
 
     const engineConfig: EngineConfig = {
       initialCapital: params.initialCapital,
-      cost: { feeRate: params.feeRate, slippageBps: params.slippageBps },
+      cost: { feeRate: params.feeRate, slippageBps: params.slippageBps, sellTaxRate: params.sellTaxRate ?? 0 },
       fillMode: params.fillMode,
       maxRiskPerTradePct: params.maxRiskPerTradePct,
       maxPositionSizePct: params.maxPositionSizePct,
       defaultStopLossPct: params.defaultStopLossPct,
-      precision: params.precision,
+      precision: params.futures?.data?.metadata.precision ?? params.precision,
+      futures: futuresData?.config,
+      captureEvents: !!futuresData,
     };
 
     // 波段日線由 4h 合成，歷史缺口會破壞日線與量能判斷；過期檢查僅適用即時雷達。
     if (strategy.id === 'crypto_wave') validateWaveCandles(candles, Date.now(), false);
-    const { trades, equityCurve } = runBacktestEngine(
+    const simulation = runBacktestEngine(
       candles,
       strategy,
       params.strategyParams,
       engineConfig,
       row.startTime
     );
+    const { trades, equityCurve } = simulation;
 
     // 年化因子:美股/台股日線用 252 交易日;加密貨幣 24h 全年無休用「一年毫秒 / 週期毫秒」
     const barsPerYear =
@@ -222,9 +248,13 @@ export const runBacktest = async (db: D1Db, backtestId: number): Promise<void> =
     const metrics = computeMetrics(equityCurve, trades, params.initialCapital, barsPerYear);
     // Profit Factor 可能為 Infinity(零虧損),JSON 不支援 → 以 9999 代表「無虧損」
     if (!Number.isFinite(metrics.profitFactor)) metrics.profitFactor = 9999;
+    const futuresEvaluation = futuresData ? buildFuturesEvaluation(candles, strategy, params.strategyParams, engineConfig,
+      row.startTime, simulation, params.futures!.direction, futuresData.markComplete, params.futures!.instrument) : undefined;
 
     // 批次寫入交易明細(13 參數/列 × 7 列 = 91 < D1 bind 上限 100)
     const statements: any[] = [];
+    /** 重跑同任務覆寫結果前先清除舊研究明細，避免重複計入成交；不涉及真實委託。 */
+    if (futuresData) await db.delete(backtestTrades).where(eq(backtestTrades.backtestId, backtestId));
     for (let i = 0; i < trades.length; i += TRADE_ROWS_PER_STATEMENT) {
       const chunk = trades.slice(i, i + TRADE_ROWS_PER_STATEMENT);
       statements.push(
@@ -255,7 +285,7 @@ export const runBacktest = async (db: D1Db, backtestId: number): Promise<void> =
       .update(backtests)
       .set({
         status: 'DONE',
-        resultJson: JSON.stringify(metrics),
+        resultJson: JSON.stringify({ ...metrics, ...(futuresEvaluation ? { futures: futuresEvaluation } : {}) }),
         equityCurveJson: JSON.stringify(downsampleEquityCurve(equityCurve, 1000)),
         error: null,
       })

@@ -1,3 +1,4 @@
+/** @file 回測請求與進度狀態；提交包含策略、成本及稅率快照，與表單呈現分離。 */
 /**
  * 【詳細繁體中文註解】：回測前端狀態機 hook
  *
@@ -22,7 +23,7 @@ import type {
 import { getSymbolsByMarket } from './constants';
 
 /** prepare 每趟最多 4000 根，2 年 15m 約 7 萬根需約 18 趟；30 趟保留暖機及缺口重試餘裕。 */
-const MAX_PREPARE_POLLS = 30;
+const MAX_PREPARE_POLLS = 100;
 
 const postJson = async (body: unknown) => {
   const response = await fetch('/api/backtest', {
@@ -138,12 +139,14 @@ export const useBacktest = () => {
           params: {
             initialCapital: form.initialCapital,
             feeRate: form.feeRatePct / 100,
+            sellTaxRate: form.sellTaxRatePct / 100,
             slippageBps: form.slippageBps,
             fillMode: form.fillMode,
             maxRiskPerTradePct: form.maxRiskPerTradePct,
             maxPositionSizePct: form.maxPositionSizePct,
             precision: symbolOption?.precision,
             strategyParams: form.strategyParams,
+            futures: form.futures,
           },
         });
 

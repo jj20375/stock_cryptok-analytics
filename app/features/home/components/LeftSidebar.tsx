@@ -1,3 +1,5 @@
+/** @file 首頁側欄；持股數字輸入驗證通過後才自動儲存。 */
+import { NumericInput } from "../../../components/NumericInput";
 import {
   Activity,
   AlertCircle,
@@ -280,9 +282,8 @@ export function LeftSidebar({
                       <div className="flex gap-2">
                         <div className="flex flex-col gap-0.5">
                           <label className="text-[7px] uppercase opacity-40 font-mono">均價</label>
-                          <input
-                            type="number"
-                            defaultValue={stock.avgPrice || ""}
+                          <NumericInput
+                            label="均價" min="0" step="any" required={false} defaultValue={stock.avgPrice || ""}
                             onBlur={(event) => onUpdatePortfolioDetails(stock.symbol, event.target.value, stock.shares || "")}
                             placeholder="0.00"
                             className="w-14 text-[10px] font-mono bg-transparent border-b border-[#141414]/10 focus:border-indigo-500 outline-none"
@@ -290,9 +291,8 @@ export function LeftSidebar({
                         </div>
                         <div className="flex flex-col gap-0.5">
                           <label className="text-[7px] uppercase opacity-40 font-mono">股數</label>
-                          <input
-                            type="number"
-                            defaultValue={stock.shares || ""}
+                          <NumericInput
+                            label="股數" min="0" step="any" required={false} defaultValue={stock.shares || ""}
                             onBlur={(event) => onUpdatePortfolioDetails(stock.symbol, stock.avgPrice || "", event.target.value)}
                             placeholder="0"
                             className="w-12 text-[10px] font-mono bg-transparent border-b border-[#141414]/10 focus:border-indigo-500 outline-none"

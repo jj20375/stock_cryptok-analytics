@@ -1,3 +1,6 @@
+import { isTwStockOrEtfCode } from './twStockRadar/securities';
+import { cryptoAutoScanEnabled, cryptoNewEntriesAllowed, cryptoSpotProtectionSymbols, isCryptoSpotProtectionTrade } from './cryptoActivityPolicy';
+import { cryptoSignalSlackChannel } from './cryptoSignalNotifications';
 import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
 import { users, paperTrades } from "../db/schema";
@@ -77,7 +80,7 @@ const resolveSlackChannel = (env: any) => {
 
 /** 虛擬幣進出場與 AI 訊號改走獨立頻道；不 fallback 到股市日報頻道。 */
 const resolveCryptoEntrySlackChannel = (env: any) => {
-  return env.CRYPTO_ENTRY_SLACK_CHANNEL_ID || process.env.CRYPTO_ENTRY_SLACK_CHANNEL_ID;
+  return cryptoSignalSlackChannel({ ...process.env, ...env });
 };
 
 const formatTopCandidates = (candidates: DailyModeCandidate[], emptyText: string) => {
@@ -227,7 +230,9 @@ const scanDailyModes = async (symbols: any[], market: "TW" | "US") => {
 };
 
 export const runStrategyEngine = async (env: any) => {
-  console.log("🚀 [Strategy Engine] 開始執行 crypto 定時策略檢查...");
+  // 自動掃描停用時只保護已持有現貨，不抓固定幣池，也不進行 AI 新訊號掃描。
+  const protectionOnly = !cryptoAutoScanEnabled(env);
+  console.log(protectionOnly ? "[Strategy Engine] 僅檢查既有現貨持倉" : "[Strategy Engine] 虛擬幣策略掃描");
   const db = drizzle(env.DB);
   const masterKey = env.MASTER_ENCRYPTION_KEY;
 
@@ -258,7 +263,8 @@ export const runStrategyEngine = async (env: any) => {
         continue;
       }
 
-      for (const symbol of SYMBOLS) {
+      const symbolsToInspect = protectionOnly ? cryptoSpotProtectionSymbols(userTrades) : SYMBOLS;
+      for (const symbol of symbolsToInspect) {
         try {
           const klines = await getKlines(symbol, userTimeframe as any, 100);
           if (klines.length < strategy.warmupBars + 2) continue;
@@ -280,7 +286,8 @@ export const runStrategyEngine = async (env: any) => {
           const currentPrice = candles[candles.length - 1].close;
           const indicators = new IndicatorCache(candles);
 
-          const openTrade = userTrades.find(trade => trade.symbol === symbol && trade.status === "OPEN");
+          // 同幣種現貨與永續可能並存；只能以現貨持倉計算現貨賣出量，不能誤取合約持倉。
+          const openTrade = userTrades.find(trade => trade.symbol === symbol && isCryptoSpotProtectionTrade(trade));
           const stopLossPrice = openTrade?.stopLossPrice ? parseFloat(openTrade.stopLossPrice) : null;
           const hitStopLoss = !!stopLossPrice && currentPrice <= stopLossPrice;
 
@@ -325,9 +332,10 @@ export const runStrategyEngine = async (env: any) => {
 
           // 取得 Slack 設定 (支援虛擬幣專用頻道分流)
           const slackToken = env.SLACK_API_TOKEN || process.env.SLACK_API_TOKEN;
-          const slackChannel = resolveCryptoEntrySlackChannel(env);
+          // 成交與既有持倉風控通知獨立保留，避免停用觀察訊號後無法得知實際平倉。
+          const slackChannel = env.CRYPTO_FUTURES_TRADE_SLACK_CHANNEL_ID || env.CRYPTO_ENTRY_SLACK_CHANNEL_ID;
 
-          if (!openTrade && isEntrySignal) {
+          if (!openTrade && isEntrySignal && cryptoNewEntriesAllowed(env)) {
             const cryptoRegime = await evaluateCryptoMarketRegime(symbol);
             const riskDecision = evaluateCapitalRisk({
               cryptoRegime,
@@ -487,6 +495,9 @@ export const runStrategyEngine = async (env: any) => {
     console.error("🔥 [Strategy Engine] 執行失敗:", error);
   }
 
+  // 停用自動掃描時不建立新訊號，也不占用行情及 AI 請求。
+  if (protectionOnly) return;
+
   // --- 主流幣 AI 趨勢掃描 (做多/做空) ---
   try {
     console.log("🔍 [Crypto AI Scan] 開始掃描主流幣趨勢...");
@@ -600,7 +611,7 @@ export const runStockDailyStrategy = async (env: any, market: "TW" | "US" = "TW"
       const response = await fetch(twseUrl, { headers: { "User-Agent": "Mozilla/5.0" } });
       const data: any = await response.json();
       const raw = data.tables?.find((t: any) => t.title?.includes("每日收盤行情"))?.data || data.data9 || data.data8 || [];
-      symbols = raw.filter((row: any) => row[0]?.length >= 4 && row[0]?.length <= 6)
+      symbols = raw.filter((row: any) => isTwStockOrEtfCode(row[0]))
         .map((row: any) => {
           const price = parseFloat(row[8]?.replace(/,/g, "") || "0");
           const changeDiff = parseFloat(row[10]?.replace(/,/g, "") || "0");

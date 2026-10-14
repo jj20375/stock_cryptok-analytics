@@ -26,38 +26,34 @@ export function usStockFourHourClosedAt(openTime: number) {
 }
 
 /**
- * 每個正常交易日由 7 根 Yahoo 1h 組成：前四根合成完整 4h，後三根合成收盤段。
- * 最新交易日的收盤段只有在 15:30 原始 K 已收盤後才建立，避免盤中每小時漂移。
+ * 以紐約當地 09:30 開盤對齊，兩段分別為 09:30–13:30、13:30–16:00。
+ * 必須逐小時齊全；缺資料時捨棄該段，不能依陣列位置把下午 K 拼到上午造成假金叉。
+ * 夏令時間由時區轉換處理；提早收盤日未取得完整正常時段時不自行猜測收盤時間。
  */
 export function aggregateUsStockFourHourCandles(hourly: UsStockCandle[]): UsStockCandle[] {
-  /** Yahoo 會額外附一筆 16:00、成交量 0 的收盤快照；它不是新 K 線，必須先移除。 */
-  const sorted = hourly.filter(candle => {
-    const clock = clockParts(candle.openTime);
-    return !(clock.hour >= 16 && candle.volume === 0);
-  }).sort((left, right) => left.openTime - right.openTime);
-  const sessions = new Map<string, UsStockCandle[]>();
-  for (const candle of sorted) {
+  const sessions = new Map<string, Map<number, UsStockCandle>>();
+  for (const candle of [...hourly].sort((left, right) => left.openTime - right.openTime)) {
+    const { hour, minute } = clockParts(candle.openTime);
+    if (minute !== 30 || hour < 9 || hour > 15) continue;
     const key = newYorkDate.format(candle.openTime);
-    const session = sessions.get(key) ?? [];
-    session.push(candle);
+    const session = sessions.get(key) ?? new Map<number, UsStockCandle>();
+    session.set(hour, candle);
     sessions.set(key, session);
   }
-  const latestKey = sorted.length ? newYorkDate.format(sorted.at(-1)!.openTime) : '';
   const result: UsStockCandle[] = [];
-  for (const [key, session] of sessions) {
-    const chunks = [session.slice(0, 4), session.slice(4, 8)];
-    for (const [index, chunk] of chunks.entries()) {
-      if (!chunk.length || (index === 0 && chunk.length < 4)) continue;
-      /** 歷史日期已完整；最新日期的第二段必須看到 15:30 K，才代表正式收盤。 */
-      if (index === 1 && key === latestKey && clockParts(chunk.at(-1)!.openTime).hour < 15) continue;
+  for (const session of sessions.values()) {
+    for (const hours of [[9, 10, 11, 12], [13, 14, 15]]) {
+      const chunk = hours.map(hour => session.get(hour));
+      if (chunk.some(candle => !candle)) continue;
+      const complete = chunk as UsStockCandle[];
       result.push({
-        openTime: chunk[0].openTime,
-        closeTime: chunk.at(-1)!.closeTime ?? usStockHourlyClosedAt(chunk.at(-1)!.openTime),
-        open: chunk[0].open,
-        high: Math.max(...chunk.map(candle => candle.high)),
-        low: Math.min(...chunk.map(candle => candle.low)),
-        close: chunk.at(-1)!.close,
-        volume: chunk.reduce((sum, candle) => sum + candle.volume, 0),
+        openTime: complete[0].openTime,
+        closeTime: complete.at(-1)!.closeTime ?? usStockHourlyClosedAt(complete.at(-1)!.openTime),
+        open: complete[0].open,
+        high: Math.max(...complete.map(candle => candle.high)),
+        low: Math.min(...complete.map(candle => candle.low)),
+        close: complete.at(-1)!.close,
+        volume: complete.reduce((sum, candle) => sum + candle.volume, 0),
       });
     }
   }

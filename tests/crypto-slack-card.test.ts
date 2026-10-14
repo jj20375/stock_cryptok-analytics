@@ -31,8 +31,18 @@ test('三個虛擬幣雷達只讀 CRYPTO_ENTRY_SLACK_CHANNEL_ID，不 fallback �
   assert.equal(cryptoEntrySlackChannel(legacyOnly), null);
   assert.equal(potentialCryptoSlackChannel(legacyOnly), null);
   assert.equal(waveCryptoSlackChannel(legacyOnly), null);
-  const dedicated = { ...legacyOnly, CRYPTO_ENTRY_SLACK_CHANNEL_ID: ' C-CRYPTO ' };
+  const dedicated = { ...legacyOnly, CRYPTO_SIGNAL_NOTIFICATIONS_ENABLED: 'true', CRYPTO_ENTRY_SLACK_CHANNEL_ID: ' C-CRYPTO ' };
   assert.equal(cryptoEntrySlackChannel(dedicated), 'C-CRYPTO');
   assert.equal(potentialCryptoSlackChannel(dedicated), 'C-CRYPTO');
   assert.equal(waveCryptoSlackChannel(dedicated), 'C-CRYPTO');
+});
+
+
+test('虛擬幣頻道存在時仍預設停用，停用覆蓋三個雷達與舊佇列投遞入口', () => {
+  const env = { DB: {} as any, CRYPTO_ENTRY_SLACK_CHANNEL_ID: 'C-CRYPTO' };
+  for (const resolve of [cryptoEntrySlackChannel, potentialCryptoSlackChannel, waveCryptoSlackChannel]) {
+    assert.equal(resolve(env), null);
+    assert.equal(resolve({ ...env, CRYPTO_SIGNAL_NOTIFICATIONS_ENABLED: 'false' }), null);
+    assert.equal(resolve({ ...env, CRYPTO_SIGNAL_NOTIFICATIONS_ENABLED: 'true' }), 'C-CRYPTO');
+  }
 });

@@ -25,17 +25,18 @@ export function twStockFourHourClosedAt(openTime: number) {
 
 /** 台股 09:00–13:00 合成第一根 4h，13:00–13:30 獨立為收盤段；不規則盤中快照直接忽略。 */
 export function aggregateTwStockFourHourCandles(hourly: TwStockCandle[]): TwStockCandle[] {
-  const sessions = new Map<string, TwStockCandle[]>();
+  const sessions = new Map<string, Map<number, TwStockCandle>>();
   for (const candle of [...hourly].sort((left, right) => left.openTime - right.openTime)) {
     const { hour, minute } = clockParts(candle.openTime);
     if (minute !== 0 || hour < 9 || hour > 13) continue;
     const key = taipeiDate.format(candle.openTime);
-    const session = sessions.get(key) ?? [];
-    session.push(candle);
+    const session = sessions.get(key) ?? new Map<number, TwStockCandle>();
+    session.set(hour, candle);
     sessions.set(key, session);
   }
   const result: TwStockCandle[] = [];
-  for (const session of sessions.values()) {
+  for (const sessionByHour of sessions.values()) {
+    const session = [...sessionByHour.values()];
     const first = session.filter(candle => clockParts(candle.openTime).hour < 13);
     if (first.length === 4) result.push({
       openTime: first[0].openTime, closeTime: first.at(-1)!.closeTime ?? twStockHourlyClosedAt(first.at(-1)!.openTime),

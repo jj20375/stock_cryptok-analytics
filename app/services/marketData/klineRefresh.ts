@@ -1,3 +1,4 @@
+import { cryptoAutoScanEnabled } from '../cryptoActivityPolicy';
 /**
  * 【詳細繁體中文註解】：K 線快取每日增量更新
  *
@@ -16,7 +17,7 @@
  */
 
 import { drizzle } from 'drizzle-orm/d1';
-import { sql } from 'drizzle-orm';
+import { ne, sql } from 'drizzle-orm';
 import { klineCache } from '../../db/schema';
 import { fetchBinanceRange, intervalToMs } from './binanceHistory';
 import { fetchStockDailyHistory, toYahooSymbol } from './stockDailyHistory';
@@ -40,6 +41,8 @@ export const runDailyKlineRefresh = async (env: any): Promise<void> => {
         interval: klineCache.interval,
       })
       .from(klineCache)
+      // 停用自動掃描時，虛擬幣快取改由手動分析更新，不能占用股票更新名額與排程請求。
+      .where(cryptoAutoScanEnabled(env) ? undefined : ne(klineCache.market, 'CRYPTO'))
       .limit(MAX_COMBOS);
 
     if (combos.length === 0) {

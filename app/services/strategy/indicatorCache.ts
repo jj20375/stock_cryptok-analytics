@@ -1,3 +1,4 @@
+/** @file 共用技術指標惰性快取；圖表與回測共用序列，無外部副作用。 */
 /**
  * 【詳細繁體中文註解】：全序列技術指標惰性快取
  *
@@ -24,6 +25,8 @@ import {
 } from '../stockService';
 import type { StockDataPoint } from '../../types';
 import type { Candle } from './types';
+import { calculateAdx, calculateBollinger, calculateSqueeze } from './advancedIndicators';
+import { bigFishSupertrend } from './bigFish';
 
 /** MACD 全序列輸出(dif=快線、macd=訊號線、hist=柱狀圖) */
 export interface MacdSeries {
@@ -131,5 +134,23 @@ export class IndicatorCache {
     return this.memo(`kd:${period}:${kPeriod}:${dPeriod}`, () =>
       calculateKD(this.getDataPoints(), period, kPeriod, dPeriod)
     );
+  }
+
+  bollinger(period = 20, multiplier = 2) {
+    return this.memo(`bb:${period}:${multiplier}`, () => calculateBollinger(this.closes, period, multiplier));
+  }
+
+  adx(period = 14) {
+    return this.memo(`adx:${period}`, () => calculateAdx(this.candles, period));
+  }
+
+  squeeze(period: number, multiplier: number, lookback: number, percentile: number, compressionBars: number, expiryBars: number) {
+    return this.memo(`squeeze:${period}:${multiplier}:${lookback}:${percentile}:${compressionBars}:${expiryBars}`, () =>
+      calculateSqueeze(this.bollinger(period, multiplier).width, lookback, percentile, compressionBars, expiryBars));
+  }
+
+  /** 使用與股票雷達相同的 Pine 暖機及 Wilder ATR 規則，避免圖表另算一條不同防守線。 */
+  bigFish() {
+    return this.memo('big-fish:2.0', () => bigFishSupertrend(this.candles));
   }
 }

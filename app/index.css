@@ -1,6 +1,12 @@
 @import "tailwindcss";
 @import "./features/tradingDashboard/dashboard.css";
 
+/* 數字錯誤訊息在深淺表面均須可讀，深色主題以粉紅提示輸入與邊界不符。 */
+.numeric-input-error { color: #be123c; }
+input[data-numeric-input][aria-invalid="true"] { border-color: #be123c; }
+.trading-shell .numeric-input-error { color: #ff91a5; }
+.trading-shell input[data-numeric-input][aria-invalid="true"] { border-color: #ff91a5 !important; }
+
 @layer utilities {
   .custom-scrollbar::-webkit-scrollbar {
     width: 4px;

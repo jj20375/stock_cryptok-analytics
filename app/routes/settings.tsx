@@ -1,4 +1,8 @@
-import { Form, redirect, useLoaderData, useActionData, useNavigation, useFetcher, useSubmit } from "react-router";
+/** @file 帳戶與交易設定；數字欄位先驗證，機密仍由既有伺服器流程儲存。 */
+import { NumericInput } from "../components/NumericInput";
+import { RiskSettingsFields } from "../features/settings/RiskSettingsFields";
+import { validateNumericInputs } from "../utils/numericInput";
+import { Form, Link, redirect, useLoaderData, useActionData, useNavigation, useFetcher, useSubmit } from "react-router";
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
 import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
@@ -284,7 +288,11 @@ export default function SettingsRoute() {
   const data = useLoaderData<typeof loader>();
   const actionData = useActionData<{ success?: boolean; message?: string; error?: string }>();
   const navigation = useNavigation();
-  const submit = useSubmit();
+  const rawSubmit = useSubmit();
+  // 即時儲存使用程式提交，不會經過瀏覽器表單驗證，因此先阻擋錯誤數值。
+  const submit = (form: HTMLFormElement | null) => {
+    if (form && validateNumericInputs(form)) rawSubmit(form);
+  };
   const isSubmitting = navigation.state === "submitting";
   
   const fetcher = useFetcher();
@@ -406,91 +414,7 @@ export default function SettingsRoute() {
                 這些參數會在任何虛擬幣開倉前先檢查。LIVE 模式還需要額外打開實戰授權，避免誤觸真實下單。
               </p>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-bold text-[#141414] mb-1">本金基準 (USDT)</label>
-                  <input
-                    type="number"
-                    name="capitalBaseUsdt"
-                    defaultValue={data.capitalBaseUsdt}
-                    min="10"
-                    step="10"
-                    className="w-full px-4 py-2 bg-white border border-[#141414] rounded-sm text-[#141414] focus:ring-1 focus:ring-[#141414] focus:outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-bold text-[#141414] mb-1">單筆最大風險 (%)</label>
-                  <input
-                    type="number"
-                    name="maxRiskPerTradePct"
-                    defaultValue={data.maxRiskPerTradePct}
-                    min="0.1"
-                    max="3"
-                    step="0.1"
-                    className="w-full px-4 py-2 bg-white border border-[#141414] rounded-sm text-[#141414] focus:ring-1 focus:ring-[#141414] focus:outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-bold text-[#141414] mb-1">每日最大虧損 (%)</label>
-                  <input
-                    type="number"
-                    name="maxDailyLossPct"
-                    defaultValue={data.maxDailyLossPct}
-                    min="0.1"
-                    max="10"
-                    step="0.1"
-                    className="w-full px-4 py-2 bg-white border border-[#141414] rounded-sm text-[#141414] focus:ring-1 focus:ring-[#141414] focus:outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-bold text-[#141414] mb-1">單筆最大倉位 (%)</label>
-                  <input
-                    type="number"
-                    name="maxPositionSizePct"
-                    defaultValue={data.maxPositionSizePct}
-                    min="1"
-                    max="100"
-                    step="1"
-                    className="w-full px-4 py-2 bg-white border border-[#141414] rounded-sm text-[#141414] focus:ring-1 focus:ring-[#141414] focus:outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-bold text-[#141414] mb-1">預設停損距離 (%)</label>
-                  <input
-                    type="number"
-                    name="riskStopLossPct"
-                    defaultValue={data.riskStopLossPct}
-                    min="1"
-                    max="30"
-                    step="0.5"
-                    className="w-full px-4 py-2 bg-white border border-[#141414] rounded-sm text-[#141414] focus:ring-1 focus:ring-[#141414] focus:outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-bold text-[#141414] mb-1">最大同時持倉數</label>
-                  <input
-                    type="number"
-                    name="maxOpenPositions"
-                    defaultValue={data.maxOpenPositions}
-                    min="1"
-                    max="20"
-                    step="1"
-                    className="w-full px-4 py-2 bg-white border border-[#141414] rounded-sm text-[#141414] focus:ring-1 focus:ring-[#141414] focus:outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-bold text-[#141414] mb-1">每日最大交易次數</label>
-                  <input
-                    type="number"
-                    name="maxTradesPerDay"
-                    defaultValue={data.maxTradesPerDay}
-                    min="1"
-                    max="50"
-                    step="1"
-                    className="w-full px-4 py-2 bg-white border border-[#141414] rounded-sm text-[#141414] focus:ring-1 focus:ring-[#141414] focus:outline-none"
-                  />
-                </div>
-              </div>
+              <RiskSettingsFields values={data} />
 
               <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <label className="flex items-start gap-3 p-4 border border-[#141414] rounded-sm bg-[#E4E3E0] cursor-pointer">
@@ -709,9 +633,11 @@ export default function SettingsRoute() {
                 </span>
               </h2>
               <p className="text-sm text-gray-700 mb-4 leading-relaxed">
-                此功能只做 USDT 永續合約多單，固定逐倉。單筆風險最多 0.25%、部位最多本金 5%；
-                出場只會平多。Demo 與正式盤使用不同金鑰，正式盤還必須開啟上方「允許 LIVE 真實下單」。
+                此區設定 USDT 永續憑證與槓桿，固定逐倉。單筆計畫風險最多 0.25%、名目部位最多本金 5%。
+                吃大魚舊來源只做多；合約專用策略支援多空，請至合約頁設定獨立的 Demo 自動化授權。
+                Demo 與正式盤使用不同金鑰，正式盤還須開啟上方「允許 LIVE 真實下單」。
               </p>
+              <p className="mb-4 text-sm"><Link to="/crypto-futures" className="font-bold text-sky-800 underline">前往合約頁：檢查 Demo 連線與設定自動交易</Link></p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-5">
                 {(['DEMO', 'LIVE'] as const).map(mode => (
                   <label key={mode} className={`p-4 border rounded-sm cursor-pointer ${data.bitgetFuturesExecutionMode === mode ? (mode === 'LIVE' ? 'border-red-700 bg-red-50' : 'border-sky-700 bg-white') : 'border-gray-300 bg-gray-50'}`}>
@@ -728,7 +654,7 @@ export default function SettingsRoute() {
                   <input type="password" name="bitgetDemoApiSecret" className="w-full px-4 py-2 border border-sky-700 rounded-sm" placeholder={data.hasBitgetDemo ? "Demo Secret 已隱藏；不變更請留空" : "Demo Secret Key"} />
                   <input type="password" name="bitgetDemoPassphrase" className="w-full px-4 py-2 border border-sky-700 rounded-sm" placeholder={data.hasBitgetDemo ? "Demo Passphrase 已隱藏；不變更請留空" : "Demo Passphrase"} />
                   <label className="grid gap-1 text-sm font-bold">槓桿上限
-                    <input type="number" name="bitgetDemoMaxLeverage" min="1" max="50" step="1" defaultValue={data.bitgetDemoMaxLeverage} className="w-full px-4 py-2 border border-sky-700 rounded-sm" />
+                    <NumericInput  label="Demo 槓桿上限" name="bitgetDemoMaxLeverage" min="1" max="50" step="1" defaultValue={data.bitgetDemoMaxLeverage} className="w-full px-4 py-2 border border-sky-700 rounded-sm" />
                   </label>
                 </fieldset>
                 <fieldset className="grid gap-3 p-4 border border-red-700 bg-red-50 rounded-sm">
@@ -737,7 +663,7 @@ export default function SettingsRoute() {
                   <input type="password" name="bitgetFuturesLiveApiSecret" className="w-full px-4 py-2 bg-white border border-red-700 rounded-sm" placeholder={data.hasBitgetFuturesLive ? "正式 Secret 已隱藏；不變更請留空" : "正式合約 Secret Key"} />
                   <input type="password" name="bitgetFuturesLivePassphrase" className="w-full px-4 py-2 bg-white border border-red-700 rounded-sm" placeholder={data.hasBitgetFuturesLive ? "正式 Passphrase 已隱藏；不變更請留空" : "正式合約 Passphrase"} />
                   <label className="grid gap-1 text-sm font-bold text-red-900">槓桿上限
-                    <input type="number" name="bitgetFuturesLiveMaxLeverage" min="1" max="50" step="1" defaultValue={data.bitgetFuturesLiveMaxLeverage} className="w-full px-4 py-2 bg-white border border-red-700 rounded-sm" />
+                    <NumericInput  label="正式合約槓桿上限" name="bitgetFuturesLiveMaxLeverage" min="1" max="50" step="1" defaultValue={data.bitgetFuturesLiveMaxLeverage} className="w-full px-4 py-2 bg-white border border-red-700 rounded-sm" />
                   </label>
                   <small className="text-red-800">API 權限只開 Read／Trade，請勿開啟提領。若執行環境有固定出口 IP，再於 Bitget 啟用 IP 白名單；一般 Cloudflare Workers 預設沒有專用固定出口 IP。</small>
                 </fieldset>

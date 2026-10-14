@@ -24,3 +24,6 @@ freqtrade/user_data/*.sqlite-*
 
 # Drizzle ORM
 .drizzle/
+
+# 合約策略研究產出的大型 K 線 JSON 與圖檔（約 7MB），可由 scripts/ 重新產生，不提交。
+research/

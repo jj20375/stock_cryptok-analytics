@@ -12,6 +12,8 @@ export async function sendSlackPost(token: string, channel: string, payload: Sla
   try {
     const response = await fetch("https://slack.com/api/chat.postMessage", {
       method: "POST",
+      // 背景通知必須有界限，避免 Slack 卡住占用 Worker 執行時間。
+      signal: AbortSignal.timeout(10_000),
       headers: {
         "Content-Type": "application/json",
         "Authorization": `Bearer ${token}`,

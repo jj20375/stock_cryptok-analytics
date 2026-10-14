@@ -8,6 +8,8 @@
   },
   "scripts": {
     "dev": "react-router dev",
+    "dev:demo": "LOCAL_BITGET_DEMO=true react-router dev --host 127.0.0.1 --port 5190 --strictPort",
+    "dev:trading": "LOCAL_BITGET_DEMO=true LOCAL_BITGET_LIVE=true react-router dev --host 127.0.0.1 --port 5190 --strictPort",
     "build": "react-router build",
     "start": "wrangler dev",
     "deploy": "npm run build && wrangler deploy",
@@ -19,6 +21,7 @@
   },
   "dependencies": {
     "@google/genai": "^1.29.0",
+    "@luxalgo/vela": "^0.8.1",
     "@react-router/node": "^7.13.1",
     "@tailwindcss/vite": "^4.1.14",
     "clsx": "^2.1.1",

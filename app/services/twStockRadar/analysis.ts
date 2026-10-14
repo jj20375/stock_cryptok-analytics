@@ -1,6 +1,6 @@
 /** @file 台股 4 小時量價、經典吃大魚與日線趨勢的純分析；不抓資料、不通知、不下單。 */
 import { IndicatorCache } from '../strategy/indicatorCache';
-import { analyzeBigFish } from '../potentialRadar/bigFish';
+import { analyzeBigFish } from '../strategy/bigFish';
 import { twStockFourHourClosedAt } from './candles';
 import { TW_STOCK_RADAR_RULES, type TwStockCandle, type TwStockObservation, type TwStockSignal } from './types';
 
@@ -108,7 +108,7 @@ export function analyzeTwStock(
   return {
     version: TW_STOCK_RADAR_RULES.version, phase,
     score: liquid ? Object.values(parts).reduce((sum, value) => sum + value, 0) : 0,
-    parts, bigFish, barTime: current.openTime, closedAt: current.closeTime ?? twStockFourHourClosedAt(current.openTime),
+    parts, bigFish: { ...bigFish, timeframe: '4h' }, barTime: current.openTime, closedAt: current.closeTime ?? twStockFourHourClosedAt(current.openTime),
     price: current.close, change4h, change1d, changeDay, change20d, spyChange20d, relative20d,
     volumeRatio: s.volumeRatio, averageDollarVolume20d, breakout: s.breakout, ema20, ema50, ema200,
     dailyEma20, dailyEma50, rsi14, atr14, distanceEma20Atr, invalidation,

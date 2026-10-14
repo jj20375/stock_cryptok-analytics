@@ -117,6 +117,7 @@ export const evaluateCapitalRisk = ({
   symbol,
   trades,
   user,
+  consecutiveLossCooldownMs,
 }: {
   cryptoRegime?: CryptoMarketRegime;
   isEntrySignal: boolean;
@@ -124,6 +125,8 @@ export const evaluateCapitalRisk = ({
   symbol: string;
   trades: TradeLike[];
   user: any;
+  /** 合約新模組連虧後只在冷卻期內擋新倉；舊流程未指定時保留原限制。 */
+  consecutiveLossCooldownMs?: number;
 }): RiskDecision => {
   const settings = getRiskSettingsFromUser(user);
   const openTrades = trades.filter((trade) => trade.status === "OPEN");
@@ -182,7 +185,8 @@ export const evaluateCapitalRisk = ({
     };
   }
 
-  if (consecutiveLosses >= 3) {
+  const lastLossAt = Math.max(0, ...trades.filter(t => t.status === 'CLOSED' && Number(t.pnl) < 0).map(t => new Date(t.closedAt || t.createdAt).getTime()));
+  if (consecutiveLosses >= 3 && (consecutiveLossCooldownMs == null || Date.now() - lastLossAt < consecutiveLossCooldownMs)) {
     return {
       allowTrade: false,
       reason: "已連續虧損 3 筆，暫停開新倉保護本金",

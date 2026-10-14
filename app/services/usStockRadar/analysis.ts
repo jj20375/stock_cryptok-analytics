@@ -1,6 +1,6 @@
 /** @file 美股 4 小時量價、經典吃大魚與日線趨勢的純分析；不抓資料、不通知、不下單。 */
 import { IndicatorCache } from '../strategy/indicatorCache';
-import { analyzeBigFish } from '../potentialRadar/bigFish';
+import { analyzeBigFish } from '../strategy/bigFish';
 import { US_STOCK_RADAR_RULES, type UsStockCandle,
   type UsStockObservation, type UsStockSignal } from './types';
 import { usStockFourHourClosedAt } from './candles';
@@ -97,7 +97,7 @@ export function analyzeUsStock(
   if (!dailyTrendUp) risks.push('個股日線 EMA20／EMA50 尚未多頭排列');
   if (!marketTrendUp) risks.push('SPY 日線趨勢尚未確認，市場逆風');
   if (relative20d <= 0) risks.push('近 20 日報酬尚未領先 SPY');
-  if (bigFish.entry && current.close < ema200) risks.push('吃大魚由 Supertrend 翻綠觸發，但價格仍在 4 小時 EMA200 下方');
+  if (bigFish.entry && current.close < ema200) risks.push('吃大魚觸發時價格仍在 4 小時 EMA200 下方，長期趨勢尚未站回');
 
   const parts = {
     trend: (trendAligned ? 18 : 0) + (dailyTrendUp ? 12 : 0),
@@ -120,7 +120,7 @@ export function analyzeUsStock(
   return {
     version: US_STOCK_RADAR_RULES.version, phase,
     score: liquid ? Object.values(parts).reduce((sum, value) => sum + value, 0) : 0,
-    parts, bigFish, barTime: current.openTime,
+    parts, bigFish: { ...bigFish, timeframe: '4h' }, barTime: current.openTime,
     closedAt: current.closeTime ?? usStockFourHourClosedAt(current.openTime),
     price: current.close, change4h, change1d, changeDay,
     change20d, spyChange20d, relative20d, volumeRatio: s.volumeRatio, averageDollarVolume20d,

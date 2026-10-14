@@ -36,7 +36,7 @@ const sampleSignals = [
 async function renderPage(trades: TradeRecord[], signals = sampleSignals) {
   const data = {
     now: Date.UTC(2026, 8, 17, 9), signalRetentionDays: 60, tradeRetentionDays: 365,
-    webhookConfigured: true, error: null, trades, signals,
+    webhookEnabled: false, webhookConfigured: false, error: null, trades, signals,
   };
   const routes = [{ id: 'root', path: '/tradingview-signals', loader: () => data, Component: TradingviewSignalsPage }];
   const handler = createStaticHandler(routes);
@@ -58,6 +58,7 @@ test('呈現複利與等權重報酬、持倉中狀態，以及被拒絕的原�
   assert.ok(html.includes('—'));
   assert.ok(html.includes('密鑰不符（已拒絕）'));
   assert.ok(html.includes('未扣手續費'));
+  assert.ok(html.includes('新的台股、美股訊號由系統雷達自行計算'));
 });
 
 test('完全沒有交易時不顯示假的 0%，並說明配對條件', async () => {

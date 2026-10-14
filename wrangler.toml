@@ -8,15 +8,31 @@ assets = { directory = "./build/client" }
 enabled = true
 
 [vars]
-# 波段雷達只產生觀察與 Slack 通知；部署前須套用 0011 migration。
-WAVE_RADAR_ENABLED = "true"
-# 潛力幣雷達保存觀察，並在虛擬幣即時進場頻道設定齊全時通知新候選；絕不下單。
-POTENTIAL_RADAR_ENABLED = "true"
-# 永續雷達優先讀 Binance Mark Price，Cloudflare 遭擋時整批切 Gate；通知只送虛擬幣即時進場頻道。
-BINANCE_PERP_RADAR_ENABLED = "true"
-# 美股雷達每 15 分鐘輕量檢查 Yahoo 1h 行情，只在新 4h／收盤段完成時全掃描。
+# 本機 Wrangler 與 Cloudflare Worker 統一使用此 Gemini 模型；只存模型名稱，不含金鑰。
+AI_MODEL = "gemini-3.1-flash-lite"
+GEMINI_REVIEW_MODEL = "gemini-3.1-flash-lite"
+# 股票訊號由系統以公開行情自行計算，停用外部 TradingView 入口，不需訂閱或警報。
+TRADINGVIEW_WEBHOOK_ENABLED = "false"
+# 停用所有虛擬幣觀察訊號推播，包含舊佇列與 TradingView；成交及持倉停損通知獨立保留。
+CRYPTO_SIGNAL_NOTIFICATIONS_ENABLED = "false"
+# 不再自動抓虛擬幣雷達或建立新倉；既有現貨與永續持倉保護仍可平倉。
+CRYPTO_AUTO_SCAN_ENABLED = "false"
+CRYPTO_NEW_ENTRIES_ENABLED = "false"
+# 獨立 Demo 自動化：Bitget 目前拒絕 Cloudflare 出口，待可用執行器完成連線檢查後才開放。
+CRYPTO_FUTURES_DEMO_AUTOMATION_ENABLED = "false"
+CRYPTO_FUTURES_DEMO_AUTOMATION_PAUSE_REASON = "Bitget 拒絕 Cloudflare 請求（403）；待可正常連線的 Demo 執行器就緒後啟用。升級 Workers 不能解除此限制。"
+# 正式合約自動化需要可連線執行器與本人 LIVE 授權；部署此程式不會開啟真實下單。
+CRYPTO_FUTURES_LIVE_AUTOMATION_ENABLED = "false"
+CRYPTO_FUTURES_LIVE_AUTOMATION_PAUSE_REASON = "此執行器尚未開放 LIVE 自動化；請先完成正式合約連線檢查與本人授權。Cloudflare 對 Bitget 403 仍待排除。"
+# 虛擬幣雷達停止自動更新；保留歷史與手動分析功能。
+WAVE_RADAR_ENABLED = "false"
+# 潛力幣停止排程掃描與通知。
+POTENTIAL_RADAR_ENABLED = "false"
+# 永續吃大魚停止排程掃描；既有持倉停損使用獨立保護工作。
+BINANCE_PERP_RADAR_ENABLED = "false"
+# 美股只在收盤附近檢查；同時涵蓋紐約夏令與冬令時間。
 US_STOCK_RADAR_ENABLED = "true"
-# 台股雷達每 15 分鐘輕量檢查 0050，只在台股新 4h／收盤段完成時全掃描。
+# 台股只在台北 13:08／13:23／13:38／13:53 檢查。
 TW_STOCK_RADAR_ENABLED = "true"
 # 機密變數已移至 .dev.vars，正式上線請透過 wrangler secret put 設定
 # GEMINI_API_KEY = ""
@@ -38,16 +54,11 @@ database_id = "6bf9d8c7-359d-405a-b243-5669a98c614d"
 migrations_dir = "drizzle"
 
 [triggers]
-# Cloudflare Cron Triggers 以 UTC 排程：
-# - 14:00 台北 = 06:00 UTC
-# - 04:30 / 04:45 台北 = 20:30 / 20:45 UTC
+# 五個 Trigger 定義；一分鐘檢查已授權的 Demo 策略，既有持倉保護／對帳仍每五分鐘執行。
 crons = [
-  # 同一條 Cron 以分鐘錯開：+1 至 +4 掃四個永續分片、+5 潛力幣 4 小時吃大魚、+7 美股、+8 台股，仍只占一個 Trigger。
-  "1,2,3,4,5,7,8,16,17,18,19,20,22,23,31,32,33,34,35,37,38,46,47,48,49,50,52,53 * * * *",
-  # 現貨潛力幣在四個永續分片完成後執行，避免同分鐘競爭 Worker 資源。
-  "6,21,36,51 * * * *",
-  # 每五分鐘只消化一則永續 Slack 佇列；Worker 內仍將策略與波段掃描限制為每 15 分鐘。
-  "*/5 * * * *",
-  "0,15 6 * * *",
-  "30,45 20 * * *"
+  "8,23,38,53 5 * * 1-5",
+  "7,22,37,52 17,18,20,21 * * 1-5",
+  "* * * * *",
+  "0,15 6 * * 1-5",
+  "30,45 20,21 * * 1-5"
 ]

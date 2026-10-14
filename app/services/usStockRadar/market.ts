@@ -88,8 +88,8 @@ export async function fetchUsStockCandles(symbol: string, interval: '4h' | '1d',
     const close = quote.close?.[index];
     const volume = quote.volume?.[index];
     const openTime = result.timestamp[index] * 1000;
-    /** 日線多留半小時定版緩衝；1h 最後一根實際只有 30 分鐘。 */
-    const closeTime = interval === '4h' ? usStockHourlyClosedAt(openTime) : openTime + 7 * 60 * 60 * 1000;
+    /** 日線以正常交易時段 16:00 收盤確認；排程於收盤後七分鐘才抓取，避免額外延後半小時。 */
+    const closeTime = interval === '4h' ? usStockHourlyClosedAt(openTime) : openTime + 6.5 * 60 * 60 * 1000;
     if ([open, high, low, close].some(value => value == null || !Number.isFinite(value)) || closeTime > cutoff) continue;
     if (Math.min(open!, high!, low!, close!) <= 0 || high! < Math.max(open!, close!) || low! > Math.min(open!, close!)) continue;
     candles.push({ openTime, closeTime, open: open!, high: high!, low: low!, close: close!, volume: Number(volume) || 0 });

@@ -1,10 +1,16 @@
+/** @component 市場、標的與策略選擇；成交設定交由子元件，資料由回測 API 驗證及保存。 */
 /**
  * 【詳細繁體中文註解】：回測設定表單
  * 市場 → 標的 → 策略 → 週期 → 範圍 → 進階設定(資金/費率/滑價/成交模式)→ 策略參數(動態表單)
  */
 
-import { useEffect, useMemo, useState } from 'react';
-import { ChevronDown, ChevronUp, Play, RefreshCw } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Play, RefreshCw } from 'lucide-react';
+import { BacktestSymbolPicker } from './BacktestSymbolPicker';
+import { BacktestMarketPicker, BacktestSettings, getExecutionFields, type ExecutionSettings } from './BacktestSettings';
+import { NumericInput } from '../../../components/NumericInput';
+import { numericFieldError, validateNumericInputs } from '../../../utils/numericInput';
+import { strategyParamError } from '../../../services/strategy/parameters';
 import { cn } from '../../../utils/cn';
 import { getSymbolsByMarket, mergeExtraUsTickers, RANGE_OPTIONS } from '../constants';
 import type { BacktestFormValues, StrategyMeta } from '../types';
@@ -18,6 +24,7 @@ interface BacktestFormProps {
   initialMarket?: 'CRYPTO' | 'US' | 'TW' | null;
   initialSymbol?: string | null;
   initialStrategyId?: string | null;
+  initialFutures?: boolean;
   onSubmit: (values: BacktestFormValues) => void;
 }
 
@@ -37,6 +44,7 @@ export function BacktestForm({
   initialMarket,
   initialSymbol,
   initialStrategyId,
+  initialFutures = false,
   onSubmit,
 }: BacktestFormProps) {
   const validInitialMarket = VALID_MARKETS.includes(initialMarket as any)
@@ -54,14 +62,16 @@ export function BacktestForm({
   const [strategyId, setStrategyId] = useState(() => initialStrategyId ?? '');
   const [interval, setInterval] = useState('4h');
   const [rangeDays, setRangeDays] = useState(180);
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  const [initialCapital, setInitialCapital] = useState(1000);
-  const [feeRatePct, setFeeRatePct] = useState(0.1);
-  const [slippageBps, setSlippageBps] = useState(5);
-  const [fillMode, setFillMode] = useState<'nextOpen' | 'close'>('nextOpen');
-  const [maxRiskPerTradePct, setMaxRiskPerTradePct] = useState(1);
-  const [maxPositionSizePct, setMaxPositionSizePct] = useState(50);
+  const [futures, setFutures] = useState(initialFutures);
+  const [futuresInstrument, setFuturesInstrument] = useState<'BITGET_USDT_PERP' | 'BYBIT_USDT_PERP'>('BITGET_USDT_PERP');
+  const [leverage, setLeverage] = useState(3);
+  const [direction, setDirection] = useState<'BOTH' | 'LONG' | 'SHORT'>('BOTH');
+  /** 成交假設集中保存；切換市場僅重設該市場的費率，不重設使用者資金。 */
+  const [execution, setExecution] = useState<ExecutionSettings>({ initialCapital: 1000, feeRatePct: initialFutures ? 0.06 : 0.1,
+    sellTaxRatePct: 0, slippageBps: 5, fillMode: 'nextOpen', maxRiskPerTradePct: initialFutures ? 0.25 : 1, maxPositionSizePct: initialFutures ? 5 : 50 });
   const [strategyParams, setStrategyParams] = useState<Record<string, number>>({});
+  /** 原生form以外的回測按鈕也須驗證；收合進階欄位後仍由狀態檢查其邊界。 */
+  const formRef = useRef<HTMLDivElement>(null);
 
   const symbols = useMemo(() => {
     const base = getSymbolsByMarket(market);
@@ -69,27 +79,34 @@ export function BacktestForm({
     return market === 'US' ? mergeExtraUsTickers(base, extraUsTickers) : base;
   }, [market, extraUsTickers]);
   const marketStrategies = useMemo(
-    () => strategies.filter((s) => s.markets.includes(market)),
-    [strategies, market]
+    () => strategies.filter((s) => s.markets.includes(market) && (futures ? s.supportedIntervals.includes('1h') && (s.futuresOnly || s.id === 'big_fish') : !s.futuresOnly)),
+    [strategies, market, futures]
   );
   const selectedStrategy = marketStrategies.find((s) => s.id === strategyId) ?? null;
   // 美股/台股僅支援日線(Yahoo 歷史資料限制,回測不走即時聚合)
   const availableIntervals = useMemo(() => {
     if (!selectedStrategy) return [];
-    return market !== 'CRYPTO'
+    return futures ? ['1h'] : market !== 'CRYPTO'
       ? selectedStrategy.supportedIntervals.filter((i) => i === '1d')
       : selectedStrategy.supportedIntervals;
-  }, [selectedStrategy, market]);
+  }, [selectedStrategy, market, futures]);
 
-  // 切換市場時重設費率預設(美股免佣 → 0;台股約 0.1425% 手續費,未計入賣出證交稅 0.3%)。
+  /** 切換市場時重設交易費及 SELL 稅率；個別商品差異可在進階設定覆寫。 */
   // 標的只在「清單模式」下才重設為第一筆,避免切換市場時洗掉使用者自訂輸入的代號。
   useEffect(() => {
     if (!useCustomSymbol) {
       const list = getSymbolsByMarket(market);
       setSymbol(list[0]?.symbol ?? '');
     }
-    setFeeRatePct(market === 'US' ? 0 : market === 'TW' ? 0.1425 : 0.1);
+    setExecution(previous => ({ ...previous, feeRatePct: market === 'US' ? 0 : market === 'TW' ? 0.1425 : 0.1, sellTaxRatePct: market === 'TW' ? 0.3 : 0 }));
   }, [market]);
+  useEffect(() => {
+    if (futures) {
+      setMarket('CRYPTO'); setInterval('1h');
+      setStrategyId(initialStrategyId?.startsWith('futures_') ? initialStrategyId : 'futures_trend_retest');
+      setExecution(previous => ({ ...previous, feeRatePct: 0.06, sellTaxRatePct: 0, maxRiskPerTradePct: 0.25, maxPositionSizePct: 5, fillMode: 'nextOpen' }));
+    }
+  }, [futures]);
 
   /** 將使用者輸入的自訂代號正規化(依市場慣例),更新後同步寫入 symbol */
   const applyCustomSymbol = (raw: string) => {
@@ -121,30 +138,30 @@ export function BacktestForm({
     setStrategyParams({ ...selectedStrategy.defaultParams });
     // 波段研究預設限制單幣曝險；選定此模式時改用下一根成交，避免樂觀成交假設。
     if (selectedStrategy.id === 'crypto_wave') {
-      setMaxRiskPerTradePct(1);
-      setMaxPositionSizePct(25);
-      setFillMode('nextOpen');
+      setExecution(previous => ({ ...previous, maxRiskPerTradePct: 1, maxPositionSizePct: 25, fillMode: 'nextOpen' }));
     }
+    if (selectedStrategy.requiresNextOpen) setExecution(previous => ({ ...previous, fillMode: 'nextOpen' }));
     if (!availableIntervals.includes(interval)) {
       setInterval(availableIntervals[0] ?? '1d');
     }
   }, [selectedStrategy?.id, availableIntervals.join(',')]);
 
+  const invalidExecution = getExecutionFields(futures).find(field => !!numericFieldError(execution[field.key], field));
+  const numericError = (selectedStrategy && strategyParamError(selectedStrategy, strategyParams))
+    || (invalidExecution && `${invalidExecution.label}：${numericFieldError(execution[invalidExecution.key], invalidExecution)}`)
+    || (futures && numericFieldError(leverage, { min: 1, max: 75, step: 1 }));
+  const invalidNumbers = !!numericError;
   const handleSubmit = () => {
-    if (!selectedStrategy || !symbol || isBusy) return;
+    if (!selectedStrategy || !symbol || isBusy || !validateNumericInputs(formRef.current) || invalidNumbers) return;
     onSubmit({
       market,
       symbol,
       strategyId: selectedStrategy.id,
       interval,
       rangeDays,
-      initialCapital,
-      feeRatePct,
-      slippageBps,
-      fillMode,
-      maxRiskPerTradePct,
-      maxPositionSizePct,
+      ...execution,
       strategyParams,
+      ...(futures ? { futures: { instrument: futuresInstrument, leverage, direction } } : {}),
     });
   };
 
@@ -158,77 +175,27 @@ export function BacktestForm({
     );
 
   return (
-    <div className="bg-white/80 border border-[#141414] rounded-sm p-4 flex flex-col gap-4">
+    <div ref={formRef} className="bg-white/80 border border-[#141414] rounded-sm p-4 flex flex-col gap-4">
       <h2 className="text-sm font-bold font-serif border-b border-[#141414]/20 pb-2">回測設定</h2>
+      <label className="text-xs flex gap-2 items-center"><input type="checkbox" checked={futures} onChange={event => setFutures(event.target.checked)} />USDT 永續合約研究</label>
+      {futures && <fieldset className="border p-2 flex flex-col gap-2 text-xs">
+        <legend>合約研究設定</legend>
+        <label>行情來源 <select value={futuresInstrument} onChange={event => setFuturesInstrument(event.target.value as typeof futuresInstrument)} className={selectClass}>
+          <option value="BITGET_USDT_PERP">Bitget 永續</option><option value="BYBIT_USDT_PERP">Bybit 永續（研究比較）</option>
+        </select></label>
+        {/* 75倍只代表研究上限；共用引擎仍依商品級距與停損緩衝降低實際倍數。 */}
+        <label>槓桿上限 <NumericInput aria-label="研究槓桿上限" min="1" max="75" step="1" value={leverage} onValueChange={setLeverage} className={selectClass} /></label>
+        <label>交易方向 <select value={direction} onChange={event => setDirection(event.target.value as typeof direction)} className={selectClass}><option value="BOTH">多空雙向研究</option><option value="LONG">僅做多</option><option value="SHORT" disabled={!selectedStrategy?.supportsShort}>僅做空</option></select></label>
+        <p>{selectedStrategy?.id === 'futures_big_fish' ? '1H吃大魚Pine條件，僅做多，沒有4H進場濾網。' : '4H 判斷盤勢、1H 確認。'}預設費率 0.06% 是研究假設，請在進階設定填入你的實際帳戶費率。風險上限 0.25%、名目部位上限 5%。</p>
+      </fieldset>}
       {selectedStrategy?.id === 'crypto_wave' && <p className="text-xs text-amber-800">
         翻倍僅為研究目標。預設單筆風險 1%、單幣上限 25%，可在進階設定調整；請分開驗證不同幣種及行情區間。
       </p>}
 
-      {/* 市場切換 */}
-      <div className="flex flex-col gap-1">
-        <span className={labelClass}>市場</span>
-        <div className="flex gap-1">
-          <button className={chipClass(market === 'CRYPTO')} onClick={() => setMarket('CRYPTO')}>
-            加密貨幣
-          </button>
-          <button className={chipClass(market === 'US')} onClick={() => setMarket('US')}>
-            美股
-          </button>
-          <button className={chipClass(market === 'TW')} onClick={() => setMarket('TW')}>
-            台股
-          </button>
-        </div>
-        {market === 'US' && (
-          <p className="text-[9px] font-mono opacity-40 mt-1">
-            含虛擬幣概念股(COIN/MSTR 等)與一般大型股,可任意搭配已註冊策略
-          </p>
-        )}
-      </div>
+      <BacktestMarketPicker market={market} onChange={value => { setMarket(value); if (value !== 'CRYPTO') setFutures(false); }} chipClass={chipClass} />
 
-      {/* 標的 */}
-      <div className="flex flex-col gap-1">
-        <div className="flex items-center justify-between">
-          <span className={labelClass}>標的</span>
-          <div className="flex gap-1">
-            <button className={chipClass(!useCustomSymbol)} onClick={() => toggleCustomSymbol(false)}>
-              清單選擇
-            </button>
-            <button className={chipClass(useCustomSymbol)} onClick={() => toggleCustomSymbol(true)}>
-              自訂代號
-            </button>
-          </div>
-        </div>
-
-        {useCustomSymbol ? (
-          <>
-            <input
-              type="text"
-              className={selectClass}
-              value={customSymbolInput}
-              onChange={(e) => applyCustomSymbol(e.target.value)}
-              placeholder={
-                market === 'CRYPTO' ? '例如 LINK 或 LINKUSDT' : market === 'TW' ? '例如 2454(不含 .TW)' : '例如 PLTR'
-              }
-            />
-            <p className="text-[9px] font-mono opacity-40">
-              {market === 'CRYPTO'
-                ? '未輸入 USDT 結尾會自動補上;需為 Binance 現貨交易對'
-                : market === 'TW'
-                  ? '請輸入證交所代號,系統會自動查詢對應日線資料'
-                  : '請輸入美股代號,系統會自動查詢對應日線資料'}
-              ,若查無資料會在補資料階段顯示錯誤訊息。
-            </p>
-          </>
-        ) : (
-          <select className={selectClass} value={symbol} onChange={(e) => setSymbol(e.target.value)}>
-            {symbols.map((s) => (
-              <option key={s.symbol} value={s.symbol}>
-                {s.name} ({s.symbol})
-              </option>
-            ))}
-          </select>
-        )}
-      </div>
+      <BacktestSymbolPicker market={market} futures={futures} custom={useCustomSymbol} input={customSymbolInput} symbol={symbol}
+        symbols={symbols} onCustomChange={toggleCustomSymbol} onInputChange={applyCustomSymbol} onSymbolChange={setSymbol} />
 
       {/* 策略 */}
       <div className="flex flex-col gap-1">
@@ -263,7 +230,8 @@ export function BacktestForm({
       <div className="flex flex-col gap-1">
         <span className={labelClass}>回測範圍</span>
         <div className="flex gap-1 flex-wrap">
-          {RANGE_OPTIONS.map((option) => (
+          {/* 公開費率約九十天，研究保留前兩次結算，加入89天而不改動原有3M快捷鍵。 */}
+          {[...RANGE_OPTIONS, ...(futures ? [{ label: '89D', days: 89 }] : [])].filter(option => !futures || option.days <= 366).sort((a, b) => a.days - b.days).map((option) => (
             <button
               key={option.label}
               className={chipClass(rangeDays === option.days)}
@@ -275,80 +243,13 @@ export function BacktestForm({
         </div>
       </div>
 
-      {/* 策略參數(動態表單) */}
-      {selectedStrategy && selectedStrategy.paramMeta.length > 0 && (
-        <div className="flex flex-col gap-2">
-          <span className={labelClass}>策略參數</span>
-          <div className="grid grid-cols-2 gap-2">
-            {selectedStrategy.paramMeta.map((meta) => (
-              <label key={meta.key} className="flex flex-col gap-0.5" title={meta.description}>
-                <span className="text-[10px] font-mono opacity-70">{meta.label}</span>
-                <input
-                  type="number"
-                  className={selectClass}
-                  value={strategyParams[meta.key] ?? ''}
-                  min={meta.min}
-                  max={meta.max}
-                  step={meta.step}
-                  onChange={(e) =>
-                    setStrategyParams((prev) => ({ ...prev, [meta.key]: Number(e.target.value) }))
-                  }
-                />
-              </label>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* 進階設定 */}
-      <button
-        className="flex items-center gap-1 text-[10px] font-mono uppercase opacity-60 hover:opacity-100"
-        onClick={() => setShowAdvanced((v) => !v)}
-      >
-        {showAdvanced ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-        進階設定(資金 / 成本 / 成交模式)
-      </button>
-      {showAdvanced && (
-        <div className="grid grid-cols-2 gap-2">
-          <label className="flex flex-col gap-0.5">
-            <span className="text-[10px] font-mono opacity-70">初始資金 (USDT/USD)</span>
-            <input type="number" className={selectClass} value={initialCapital} min={100}
-              onChange={(e) => setInitialCapital(Number(e.target.value))} />
-          </label>
-          <label className="flex flex-col gap-0.5">
-            <span className="text-[10px] font-mono opacity-70">手續費率 %(單邊)</span>
-            <input type="number" className={selectClass} value={feeRatePct} min={0} step={0.01}
-              onChange={(e) => setFeeRatePct(Number(e.target.value))} />
-          </label>
-          <label className="flex flex-col gap-0.5">
-            <span className="text-[10px] font-mono opacity-70">滑價 (bps)</span>
-            <input type="number" className={selectClass} value={slippageBps} min={0} step={1}
-              onChange={(e) => setSlippageBps(Number(e.target.value))} />
-          </label>
-          <label className="flex flex-col gap-0.5">
-            <span className="text-[10px] font-mono opacity-70">成交模式</span>
-            <select className={selectClass} value={fillMode}
-              onChange={(e) => setFillMode(e.target.value as 'nextOpen' | 'close')}>
-              <option value="nextOpen">下一根開盤(保守,無前視)</option>
-              <option value="close">訊號當根收盤(對齊實盤)</option>
-            </select>
-          </label>
-          <label className="flex flex-col gap-0.5">
-            <span className="text-[10px] font-mono opacity-70">單筆風險 %</span>
-            <input type="number" className={selectClass} value={maxRiskPerTradePct} min={0.1} step={0.1}
-              onChange={(e) => setMaxRiskPerTradePct(Number(e.target.value))} />
-          </label>
-          <label className="flex flex-col gap-0.5">
-            <span className="text-[10px] font-mono opacity-70">最大倉位 %</span>
-            <input type="number" className={selectClass} value={maxPositionSizePct} min={1} max={100} step={1}
-              onChange={(e) => setMaxPositionSizePct(Number(e.target.value))} />
-          </label>
-        </div>
-      )}
+      <BacktestSettings strategy={selectedStrategy} params={strategyParams} execution={execution} market={market} futures={futures}
+        onParamChange={(key, value) => setStrategyParams(previous => ({ ...previous, [key]: value }))}
+        onExecutionChange={change => setExecution(previous => ({ ...previous, ...change }))} />
 
       <button
         onClick={handleSubmit}
-        disabled={isBusy || !selectedStrategy}
+        disabled={isBusy || !selectedStrategy || invalidNumbers}
         className={cn(
           'flex items-center justify-center gap-2 px-4 py-2 text-xs font-mono font-bold border border-[#141414] rounded-sm transition-all',
           isBusy
@@ -359,6 +260,7 @@ export function BacktestForm({
         {isBusy ? <RefreshCw size={14} className="animate-spin" /> : <Play size={14} />}
         {isBusy ? '回測執行中...' : '開始回測'}
       </button>
+      {invalidNumbers && <p role="status" className="text-xs text-rose-600">{numericError}；請修正欄位數值後再開始回測。</p>}
 
       <p className="text-[10px] leading-relaxed opacity-50">
         ⚠️ 回測績效基於歷史資料與模擬假設(停損優先、估計滑價/手續費、SHORT 僅模擬),不代表未來獲利。

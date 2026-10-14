@@ -1,3 +1,6 @@
+/** @file 持股管理；數字草稿保留文字，通過欄位檢查後才更新持股紀錄。 */
+import { numericFieldError } from "../utils/numericInput";
+import { NumericInput } from "../components/NumericInput";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { type LoaderFunctionArgs, useLoaderData } from "react-router";
 import { 
@@ -247,6 +250,7 @@ export default function PortfolioPage() {
   };
 
   const handleUpdate = async (id: number, symbol: string) => {
+    if (Object.entries(editValues).some(([key, value]) => numericFieldError(String(value), { min: 0, step: "any", required: key !== "fees" }))) return;
     setIsLoading(true);
     try {
       const res = await fetch("/api/portfolio", {
@@ -545,32 +549,29 @@ export default function PortfolioPage() {
                   </div>
                   <div className="md:col-span-1">
                     <label className="text-[10px] font-mono uppercase opacity-50 block mb-2">購買均價</label>
-                    <input 
-                      type="number"
+                    <NumericInput
                       step="any"
                       required
-                      value={newAsset.avgPrice}
+                      label="購買均價" min="0" value={newAsset.avgPrice}
                       onChange={(e) => setNewAsset({...newAsset, avgPrice: e.target.value})}
                       className="w-full bg-[#141414]/5 border border-[#141414]/10 p-2 text-xs font-mono focus:outline-none focus:border-[#141414]"
                     />
                   </div>
                   <div className="md:col-span-1">
                     <label className="text-[10px] font-mono uppercase opacity-50 block mb-2">持股數量</label>
-                    <input 
-                      type="number"
+                    <NumericInput
                       step="any"
                       required
-                      value={newAsset.shares}
+                      label="持股數量" min="0" value={newAsset.shares}
                       onChange={(e) => setNewAsset({...newAsset, shares: e.target.value})}
                       className="w-full bg-[#141414]/5 border border-[#141414]/10 p-2 text-xs font-mono focus:outline-none focus:border-[#141414]"
                     />
                   </div>
                   <div className="md:col-span-1">
                     <label className="text-[10px] font-mono uppercase opacity-50 block mb-2">交易手續費</label>
-                    <input 
-                      type="number"
+                    <NumericInput
                       step="any"
-                      value={newAsset.fees}
+                      label="交易手續費" min="0" required={false} value={newAsset.fees}
                       onChange={(e) => setNewAsset({...newAsset, fees: e.target.value})}
                       className="w-full bg-[#141414]/5 border border-[#141414]/10 p-2 text-xs font-mono focus:outline-none focus:border-[#141414]"
                     />
@@ -645,10 +646,9 @@ export default function PortfolioPage() {
                           </td>
                           <td className="p-5 text-right">
                             {isEditing ? (
-                              <input 
-                                type="number"
+                              <NumericInput
                                 className="w-24 bg-white border border-[#141414] p-2 text-xs font-mono outline-none focus:ring-1 ring-[#141414]"
-                                value={editValues.avgPrice}
+                                label="購買均價" min="0" value={editValues.avgPrice}
                                 onChange={(e) => setEditValues({ ...editValues, avgPrice: e.target.value })}
                               />
                             ) : (
@@ -657,10 +657,9 @@ export default function PortfolioPage() {
                           </td>
                           <td className="p-5 text-right">
                             {isEditing ? (
-                              <input 
-                                type="number"
+                              <NumericInput
                                 className="w-20 bg-white border border-[#141414] p-2 text-xs font-mono outline-none focus:ring-1 ring-[#141414]"
-                                value={editValues.shares}
+                                label="持股數量" min="0" value={editValues.shares}
                                 onChange={(e) => setEditValues({ ...editValues, shares: e.target.value })}
                               />
                             ) : (
@@ -669,10 +668,9 @@ export default function PortfolioPage() {
                           </td>
                           <td className="p-5 text-right">
                             {isEditing ? (
-                              <input 
-                                type="number"
+                              <NumericInput
                                 className="w-20 bg-white border border-[#141414] p-2 text-xs font-mono outline-none focus:ring-1 ring-[#141414]"
-                                value={editValues.fees}
+                                label="交易手續費" min="0" required={false} value={editValues.fees}
                                 onChange={(e) => setEditValues({ ...editValues, fees: e.target.value })}
                               />
                             ) : (

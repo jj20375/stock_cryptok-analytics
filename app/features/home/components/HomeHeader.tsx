@@ -1,5 +1,6 @@
 import { RefreshCw, Search } from 'lucide-react';
 import type { FormEvent } from 'react';
+import { Link } from 'react-router';
 import { cn } from '../../../utils/cn';
 import type { MarketKey, StockDataPoint, StockOption } from '../types';
 
@@ -85,6 +86,9 @@ export function HomeHeader({
             </button>
           ))}
         </div>
+        <Link to="/bitget-stock-perps" className="px-3 py-1 text-[10px] font-mono border border-[#141414] rounded-sm hover:bg-[#141414] hover:text-[#E4E3E0]">
+          Bitget 股票合約
+        </Link>
       </div>
 
       <div className="hidden sm:flex items-center gap-4 md:gap-6 mt-2 md:mt-0">

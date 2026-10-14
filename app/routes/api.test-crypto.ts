@@ -1,3 +1,4 @@
+import { cryptoSignalSlackChannel } from '../services/cryptoSignalNotifications';
 import { type LoaderFunctionArgs } from "react-router";
 import { evaluateCryptoStrategy } from "../services/stockService";
 import { getAIResponse } from "../services/aiService";
@@ -26,7 +27,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     const analysis = await evaluateCryptoStrategy(symbol, '4h');
     const slackToken = env.SLACK_API_TOKEN || process.env.SLACK_API_TOKEN;
     /** 手動虛擬幣測試同樣只送到新的即時進場頻道，避免測試訊息污染日報頻道。 */
-    const slackChannel = env.CRYPTO_ENTRY_SLACK_CHANNEL_ID || process.env.CRYPTO_ENTRY_SLACK_CHANNEL_ID;
+    const slackChannel = cryptoSignalSlackChannel({ ...process.env, ...env });
 
     if (analysis.signal === 'HOLD') {
       return Response.json({ 
@@ -64,7 +65,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     }
 
     return Response.json({ 
-      message: "測試成功！訊號已發送至 Slack",
+      message: slackChannel ? "測試成功，已嘗試推播 Slack" : "分析完成；虛擬幣訊號通知已停用或未設定頻道",
       signal: analysis.signal,
       aiAdvice: aiAdvice
     });

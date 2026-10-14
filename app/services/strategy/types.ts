@@ -1,3 +1,4 @@
+/** @file 策略、進場快照與持倉型別；策略只產生建議，成交與副作用由呼叫端處理。 */
 /**
  * 【詳細繁體中文註解】：策略抽象層 — 核心型別定義
  *
@@ -13,6 +14,23 @@
  */
 
 import type { IndicatorCache } from './indicatorCache';
+
+/** 訊號收盤時鎖定的價位；下一根成交重新驗證，不能用未來 ATR 或移動均線改寫原始風險。 */
+export interface StrategyEntryPlan {
+  /** ATR 倍數形成的絕對價格距離，單位與標的報價相同。 */
+  stopDistance: number;
+  /** 合約以結構價鎖定失效點；成交後仍須保留最小 ATR 距離，不可把停損縮進結構內。 */
+  stopPrice?: number;
+  minStopDistance?: number;
+  maxStopDistance?: number;
+  targetMultiple?: number;
+  invalidationPrice?: number;
+  minPrice?: number;
+  maxPrice?: number;
+  targetPrice?: number;
+  minRewardRisk?: number;
+  breakoutPrice?: number;
+}
 
 /** 單根 K 線。時間一律為毫秒 UTC timestamp */
 export interface Candle {
@@ -37,6 +55,8 @@ export interface OpenPositionState {
   entryTime: number;
   /** 進場時的 K 線索引(回測引擎用來計算持倉根數;live 引擎可不填) */
   entryIndex?: number;
+  /** 保留訊號根的突破位／均值目標，避免進場後重新計算歷史條件。 */
+  entryPlan?: StrategyEntryPlan;
 }
 
 /**
@@ -47,9 +67,9 @@ export interface OpenPositionState {
  * - HOLD:不動作。
  */
 export type StrategyAction =
-  | { type: 'ENTRY'; side: 'LONG' | 'SHORT'; stopLossPct?: number; reason: string }
+  | { type: 'ENTRY'; side: 'LONG' | 'SHORT'; stopLossPct?: number; entryPlan?: StrategyEntryPlan; reason: string }
   | { type: 'EXIT'; reason: string }
-  | { type: 'HOLD' };
+  | { type: 'HOLD'; reason?: string };
 
 /** 策略評估上下文:回測引擎每根 K 線建構一次;live 引擎以最後一根「已收盤」K 線建構 */
 export interface StrategyContext {
@@ -90,13 +110,21 @@ export interface StrategyModule {
   markets: ('CRYPTO' | 'US' | 'TW')[];
   /** 支援的 K 線週期,如 ['15m', '1h', '4h'] */
   supportedIntervals: string[];
+  /** 需要驗證下一根開盤的策略不能以當根收盤假定成交。 */
+  requiresNextOpen?: boolean;
   /**
    * 暖機根數:指標穩定所需的最少 K 線數。
    * 回測引擎從第 warmupBars 根開始評估,避免指標初始值失真造成假訊號。
    */
   warmupBars: number;
+  /** 可調回看窗口的策略依最終參數增加暖機；資料準備、圖表與引擎必須一致。 */
+  warmupBarsForParams?: (params: Record<string, number>) => number;
   /** 是否會產生 SHORT 訊號(SHORT 僅回測模擬,現貨 live 不支援) */
   supportsShort: boolean;
+  /** 合約專用模組不得以現貨行情或現貨資金模型執行。 */
+  futuresOnly?: boolean;
+  /** 未通過驗證的研究候選僅能模擬；交易入口在資料庫與交易所副作用前拒絕新倉。 */
+  backtestOnly?: boolean;
   /** 預設參數 */
   defaultParams: Record<string, number>;
   /** 參數說明(供 UI 動態表單) */

@@ -51,7 +51,7 @@ test('Slack 失敗保留待發通知，同根重跑會補送且不重複發送',
       if (url.pathname.endsWith('/orderbook')) return payload({ b: [['100', '1000']], a: [['100.01', '1000']], ts: Date.now() });
       throw new Error('非預期行情請求');
     };
-    const env: PotentialEnv = { DB: db, POTENTIAL_RADAR_ENABLED: 'true', SLACK_API_TOKEN: 'test-token', CRYPTO_ENTRY_SLACK_CHANNEL_ID: 'test-channel' };
+    const env: PotentialEnv = { DB: db, POTENTIAL_RADAR_ENABLED: 'true', SLACK_API_TOKEN: 'test-token', CRYPTO_SIGNAL_NOTIFICATIONS_ENABLED: 'true', CRYPTO_ENTRY_SLACK_CHANNEL_ID: 'test-channel' };
     /** 此合成行情未滿足中週期共振；待發列由本測試建立，專注驗證 Slack 補送而非重複量價判斷。 */
     await runPotentialRadar(env);
     await db.prepare('INSERT INTO potential_radar_notifications (id, message, created_at, sent_at) VALUES (?, ?, ?, NULL)')

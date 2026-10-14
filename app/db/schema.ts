@@ -1,6 +1,7 @@
 /** @file 資料表彙整；匯出交易資料及獨立的公開行情觀察資料，供 migration 使用。 */
 import { sqliteTable, text, integer, real, uniqueIndex, index } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
+export * from './bitgetLedgerSchema';
 export { waveRadar, waveNotifications, waveLease } from './waveSchema';
 export { potentialRadar, potentialObservations, potentialRun, potentialRadarNotifications } from './potentialSchema';
 export { freqtradeRuns } from './freqtradeSchema';
@@ -8,6 +9,7 @@ export { binancePerpRun, binancePerpAlerts } from './binancePerpSchema';
 export { usStockRadar, usStockObservations, usStockRadarRun, usStockRadarNotifications } from './usStockRadarSchema';
 export { twStockRadar, twStockObservations, twStockRadarRun, twStockRadarNotifications } from './twStockRadarSchema';
 export { cryptoAutoOrders } from './cryptoAutoTradeSchema';
+export { futuresAutomation, futuresAutomationEvents, futuresAutomationCandles } from './futuresAutomationSchema';
 
 // 【詳細繁體中文註解】：使用者資料表
 export const users = sqliteTable('users', {
@@ -96,6 +98,9 @@ export const users = sqliteTable('users', {
 export const paperTrades = sqliteTable('paper_trades', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   userId: integer('user_id').notNull().references(() => users.id),
+  /** 新紀錄以金鑰指紋隔離帳戶；舊紀錄必須找到原始成交才能綁定。 */
+  ledgerAccountId: text('ledger_account_id'),
+  reconciliationStatus: text('reconciliation_status').default('ESTIMATED').notNull(),
   
   // 交易模式: PAPER 或 LIVE
   mode: text('mode').default('PAPER').notNull(),
@@ -130,7 +135,11 @@ export const paperTrades = sqliteTable('paper_trades', {
   
   createdAt: text('created_at').default(sql`(CURRENT_TIMESTAMP)`).notNull(),
   closedAt: text('closed_at'),
-});
+}, table => [
+  /** 已接受但未成交也保留風控槽；兩個事件不能同時對同商品開倉。 */
+  uniqueIndex('crypto_bitget_open_slot_idx').on(table.userId, table.mode, table.symbol)
+    .where(sql`${table.exchange} = 'BITGET' AND ${table.market} = 'CRYPTO' AND ${table.status} = 'OPEN' AND ${table.ledgerAccountId} IS NOT NULL`),
+]);
 
 // 【詳細繁體中文註解】：使用者持股與追蹤清單
 export const userPortfolio = sqliteTable('user_portfolio', {

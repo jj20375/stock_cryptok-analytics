@@ -1,3 +1,4 @@
+/** @file 圖表、回測與研究用策略註冊表；新增模組不會自動啟用排程或實盤下單。 */
 /**
  * 【詳細繁體中文註解】：策略註冊表
  *
@@ -18,6 +19,14 @@ import volumeNoBreakoutFade from './strategies/volumeNoBreakoutFade';
 import dailyVolumeSpike from './strategies/dailyVolumeSpike';
 import cryptoWave from './strategies/cryptoWave';
 import cryptoMomentumBurst from './strategies/cryptoMomentumBurst';
+import bigFishTrend from './strategies/bigFishTrend';
+import extremeReversal from './strategies/extremeReversal';
+import volatilitySqueezeBreakout from './strategies/volatilitySqueezeBreakout';
+import rangeMeanReversion from './strategies/rangeMeanReversion';
+import futuresTrendRetest from './strategies/futuresTrendRetest';
+import futuresRangeReclaim from './strategies/futuresRangeReclaim';
+import futuresRsiPullbackResearch from './strategies/futuresRsiPullbackResearch';
+import futuresBigFish from './strategies/futuresBigFish';
 
 /** 全部已註冊策略(id 不可重複) */
 const STRATEGY_MODULES: StrategyModule[] = [
@@ -29,6 +38,14 @@ const STRATEGY_MODULES: StrategyModule[] = [
   dailyVolumeSpike,
   cryptoWave,
   cryptoMomentumBurst,
+  bigFishTrend,
+  extremeReversal,
+  volatilitySqueezeBreakout,
+  rangeMeanReversion,
+  futuresTrendRetest,
+  futuresRangeReclaim,
+  futuresRsiPullbackResearch,
+  futuresBigFish,
 ];
 
 const STRATEGY_MAP = new Map<string, StrategyModule>(

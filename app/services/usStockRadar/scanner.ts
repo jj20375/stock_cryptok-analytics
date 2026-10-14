@@ -1,3 +1,4 @@
+import { STOCK_NOTICE_WINDOW_MS } from '../stockSignalFreshness';
 /** @file 美股 4 小時進場、日線確認雷達排程：動態初篩、研究追蹤與獨立 Slack 佇列；絕不下單。 */
 import { and, desc, eq, gte, isNull, lt, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -181,8 +182,8 @@ async function deliverUsStockNotifications(db: RadarDb, env: UsStockRadarEnv) {
       .from(usStockRadarNotifications).where(isNull(usStockRadarNotifications.sentAt))
       .orderBy(desc(usStockRadarNotifications.barTime)).limit(1);
     if (!newest) return;
-    /** 4 小時訊號最多保留一個 4h 週期；更新的批次仍會立即淘汰較舊待發列。 */
-    if (Date.now() >= usStockFourHourClosedAt(newest.barTime) + US_STOCK_FOUR_HOUR_MS) {
+    /** 訊號最多保留收盤後 35 分鐘；更新的批次仍會立即淘汰較舊待發列。 */
+    if (Date.now() >= usStockFourHourClosedAt(newest.barTime) + STOCK_NOTICE_WINDOW_MS) {
       await db.delete(usStockRadarNotifications).where(isNull(usStockRadarNotifications.sentAt));
       return;
     }

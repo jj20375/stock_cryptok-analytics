@@ -1,5 +1,6 @@
+import { isFreshStockNotice } from '../stockSignalFreshness';
 /** @file 美股候選的獨立 Slack 通知選擇與內容；不含下單指令或券商操作。 */
-import { bigFishLabel } from '../potentialRadar/bigFish';
+import { bigFishLabel } from '../strategy/bigFish';
 import { createCryptoSignalCard, serializeSlackCard } from '../slack/cryptoSignalCard';
 import { isUsStockCandidate, US_STOCK_PHASE_LABELS,
   type UsStockSnapshot } from './types';
@@ -9,6 +10,8 @@ export type UsStockNoticeKey = 'BIG_FISH' | 'BREAKOUT' | 'RETEST' | 'CANDIDATE';
 /** 經典吃大魚每個新觸發根都提醒；一般候選只在新入選或突破／回踩升級時提醒。 */
 export function selectUsStockNotice(next: UsStockSnapshot, previous: UsStockSnapshot | null): UsStockNoticeKey | null {
   if (!next.signal || next.error || !isUsStockCandidate(next.signal)) return null;
+  // 掃描重試不得將尚未收盤或過時事件當成即時進場；使用快照時間確保離線重算一致。
+  if (!isFreshStockNotice(next.signal.closedAt, next.checkedAt)) return null;
   if (previous?.signal?.barTime === next.signal.barTime) return null;
   if (next.signal.bigFish.entry) return 'BIG_FISH';
   if (next.signal.phase === 'BREAKOUT' && previous?.signal?.phase !== 'BREAKOUT') return 'BREAKOUT';
@@ -64,6 +67,6 @@ export function formatUsStockCard(snapshot: UsStockSnapshot) {
     invalidation: `$${number(signal.invalidation)}`,
     strength: `品質 ${signal.score}/100｜量能 ${signal.volumeRatio.toFixed(2)}x｜相對 SPY ${signed(signal.relative20d)}｜當日 ${signed(signal.changeDay)}`,
     risk: `${trend}｜${risks}；美股可能跳空${leverageRisk}`,
-    source: 'Yahoo Finance 美股公開行情',
+    source: '系統自算 · Yahoo Finance 美股公開行情',
   }));
 }

@@ -1,3 +1,4 @@
+import { tradingviewMarketLabel } from '../../services/tradingview/market';
 /** @file TradingView 紙上績效的摘要卡片與個別標的排行；所有分母與缺值都直接呈現，不美化。 */
 import type { PerformanceSummary, SymbolPerformance } from '../../services/tradingview/performance';
 
@@ -53,7 +54,7 @@ export function SymbolTable({ rows }: { rows: SymbolPerformance[] }) {
         <th key={label} className="py-3 pr-4 font-medium">{label}</th>)}</tr></thead>
       <tbody>{rows.map(row => <tr key={`${row.market}:${row.symbol}`} className="border-b border-black/10">
         <td className="py-3 pr-4 font-semibold">{row.symbol}</td>
-        <td className="py-3 pr-4">{row.market === 'tw_stock' ? '台股' : '虛擬幣'}</td>
+        <td className="py-3 pr-4">{tradingviewMarketLabel(row.market)}</td>
         <td className={`py-3 pr-4 ${tone(row.compoundReturn)}`}>{pct(row.compoundReturn)}</td>
         <td className={`py-3 pr-4 ${tone(row.averageReturn)}`}>{pct(row.averageReturn)}</td>
         <td className="py-3 pr-4">{rate(row.winRate)}<small className="block opacity-60">n={row.closedTrades}</small></td>

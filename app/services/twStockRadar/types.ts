@@ -7,7 +7,7 @@ export const TW_STOCK_DAY_MS = 24 * 60 * 60 * 1000;
 
 /** 金額門檻單位為新台幣；分數只供同版本排序，不是勝率或報酬保證。 */
 export const TW_STOCK_RADAR_RULES = {
-  version: 'tw-4h-daily-v1-big-fish-2.0', minFourHourBars: 220, minDailyBars: 55,
+  version: 'tw-4h-daily-v2-securities-big-fish-2.0', minFourHourBars: 220, minDailyBars: 55,
   /** 排除低價與低成交額標的，降低漲跌停、價差及無量風險。 */
   minPriceTwd: 10, minAverageTurnoverTwd: 50_000_000,
   breakoutVolumeMultiple: 1.5,

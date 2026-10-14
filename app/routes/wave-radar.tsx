@@ -1,3 +1,4 @@
+import { cryptoSignalSlackChannel } from '../services/cryptoSignalNotifications';
 /** @component 波段雷達終端；每分鐘重讀快照，不觸發市場掃描、通知或下單。 */
 import { useEffect, useState } from 'react';
 import { redirect, useLoaderData, useRevalidator, type LoaderFunctionArgs } from 'react-router';
@@ -18,7 +19,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   const env = (context as any).cloudflare.env;
   if (!await getUserId(request, env)) throw redirect('/login');
   const db = drizzle(env.DB);
-  const settings = { enabled: env.WAVE_RADAR_ENABLED === 'true', slack: !!(env.SLACK_API_TOKEN && env.CRYPTO_ENTRY_SLACK_CHANNEL_ID) };
+  const settings = { enabled: env.WAVE_RADAR_ENABLED === 'true', slack: !!(env.SLACK_API_TOKEN && cryptoSignalSlackChannel(env)) };
   try {
     const rows = await db.select().from(waveRadar);
     const [pending] = await db.select({ total: count() }).from(waveNotifications).where(isNull(waveNotifications.sentAt));

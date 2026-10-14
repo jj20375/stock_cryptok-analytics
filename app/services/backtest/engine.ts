@@ -1,3 +1,4 @@
+/** @file 逐根回測與圖表重放共用引擎；模擬成交及持倉，不下單或寫入資料庫。 */
 /**
  * 【詳細繁體中文註解】：回測引擎核心 — 逐根 K 線重放
  *
@@ -21,16 +22,20 @@
  * 本金基底採「當前權益」(複利模式)。
  */
 
-import type { Candle, OpenPositionState, StrategyModule } from '../strategy/types';
+import type { Candle, OpenPositionState, StrategyModule, StrategyEntryPlan, StrategyAction } from '../strategy/types';
 import { IndicatorCache } from '../strategy/indicatorCache';
 import { calculateRiskBasedPosition } from '../positionSizing';
 import { applySlippage, calculateFee, type CostModel } from './costs';
+import { resolveEntryRisk } from './entryExecution';
+import { futuresEntryRisk, futuresLeverageForStop, knownFundingBudget, liquidationEstimate, type FuturesSimulation } from './futures';
+import { futuresFundingHours } from '../cryptoFutures/automation';
+import { HOUR_MS, futuresRegime, type FuturesPhase } from '../strategy/futuresRegime';
 
 /** 成交模式:nextOpen = 訊號下一根開盤成交(預設);close = 訊號當根收盤成交 */
 export type FillMode = 'nextOpen' | 'close';
 
 export interface EngineConfig {
-  /** 初始資金(USDT 或 USD) */
+  /** 初始資金，與標的報價同幣別（如 USDT／USD／TWD），不模擬匯率兌換。 */
   initialCapital: number;
   /** 成本模型(手續費 + 滑價) */
   cost: CostModel;
@@ -43,6 +48,24 @@ export interface EngineConfig {
   defaultStopLossPct: number;
   /** 下單數量小數位數 */
   precision: number;
+  /** 圖表不以資料結尾假造平倉；回測預設仍強制結算。 */
+  closeAtEnd?: boolean;
+  /** 圖表才收集逐筆成交／取消事件，回測績效路徑不增加事件記憶體。 */
+  captureEvents?: boolean;
+  /** 存在時改用永續逐倉資金模型；舊回測缺值仍完全沿用原有行為。 */
+  futures?: FuturesSimulation;
+}
+
+export interface EngineEvent {
+  type: 'ENTRY' | 'EXIT' | 'WARNING';
+  side: 'LONG' | 'SHORT';
+  timestamp: number;
+  price: number;
+  reason: string;
+  signalTime: number;
+  stopLossPrice?: number;
+  targetPrice?: number;
+  cancelled?: boolean;
 }
 
 /** 單筆已完成(或強制平倉)交易 */
@@ -62,6 +85,8 @@ export interface BacktestTradeRecord {
   holdingBars: number;
   entryReason: string;
   exitReason: string;
+  fundingPnl?: number;
+  initialMargin?: number;
 }
 
 /** 權益曲線單點(每根 K 線一點,downsample 交給 metrics) */
@@ -75,12 +100,18 @@ export interface EngineResult {
   equityCurve: EquityPoint[];
   /** 實際開始評估的索引(暖機之後),供績效年化與除錯 */
   firstEvaluatedIndex: number;
+  events: EngineEvent[];
+  /** 最後一根已確認、但尚無下一根開盤可成交的訊號，圖表須標成等待。 */
+  pendingSignal: EngineEvent | null;
+  /** 只計算研究區間；未成立條件按空手根統計，取消按候選委託統計，不混成勝率。 */
+  entryDiagnostics?: { evaluatedBars: number; signals: number; filled: number; cancelled: number; pending: number;
+    phases: Record<FuturesPhase, number>; filters: Record<string, number>; rejections: Record<string, number> };
 }
 
 /** 待成交動作(fillMode='nextOpen' 時暫存到下一根執行) */
 type PendingOrder =
-  | { kind: 'ENTRY'; side: 'LONG' | 'SHORT'; stopLossPct: number; reason: string }
-  | { kind: 'EXIT'; reason: string };
+  | { kind: 'ENTRY'; action: Extract<StrategyAction, { type: 'ENTRY' }>; signalTime: number }
+  | { kind: 'EXIT'; reason: string; signalTime: number };
 
 /**
  * 執行回測。
@@ -95,17 +126,38 @@ export const runBacktestEngine = (
   strategy: StrategyModule,
   params: Record<string, number>,
   config: EngineConfig,
-  tradeStartTime: number
+  tradeStartTime: number,
+  sharedIndicators?: IndicatorCache
 ): EngineResult => {
-  const indicators = new IndicatorCache(candles);
+  if (strategy.requiresNextOpen && config.fillMode !== 'nextOpen') throw new Error('此策略需下一根開盤成交，不能使用當根收盤模式');
+  if (strategy.futuresOnly && !config.futures) throw new Error('合約專用策略需 USDT 永續行情與合約資金模型');
+  if (config.futures && !config.futures.fundingComplete) throw new Error('資金費率覆蓋不足，不能宣告完整合約回測');
+  const indicators = sharedIndicators ?? new IndicatorCache(candles);
   const trades: BacktestTradeRecord[] = [];
   const equityCurve: EquityPoint[] = [];
+  const events: EngineEvent[] = [];
+  const entryDiagnostics: NonNullable<EngineResult['entryDiagnostics']> = { evaluatedBars: 0, signals: 0, filled: 0, cancelled: 0, pending: 0,
+    phases: { UP: 0, DOWN: 0, RANGE: 0, WAIT: 0, SHOCK: 0 }, filters: {}, rejections: {} };
+  const recordEvent = (event: EngineEvent) => {
+    if (config.futures && event.type === 'ENTRY') entryDiagnostics.filled++;
+    if (config.futures && event.cancelled) {
+      entryDiagnostics.cancelled++;
+      entryDiagnostics.rejections[event.reason] = (entryDiagnostics.rejections[event.reason] ?? 0) + 1;
+    }
+    if (config.captureEvents) events.push(event);
+  };
 
   let cash = config.initialCapital;
   let position: OpenPositionState | null = null;
   let positionEntryFee = 0;
   let positionEntryReason = '';
   let pending: PendingOrder | null = null;
+  let positionFunding = 0, initialMargin = 0, lossStreak = 0, cooldownUntil = 0;
+  const dailyPnl = new Map<string, number>();
+  const dayKey = (time: number) => new Date(time + 8 * HOUR_MS).toISOString().slice(0, 10);
+  const marks = new Map(config.futures?.marks.map(c => [c.openTime, c]) ?? []);
+  const funding = [...(config.futures?.funding ?? [])].sort((a, b) => a.time - b.time);
+  let fundingIndex = 0;
 
   // 找出第一個「暖機足夠且進入回測區間」的索引
   let firstEvaluatedIndex = -1;
@@ -113,6 +165,7 @@ export const runBacktestEngine = (
   /** 目前權益(以指定價格評價持倉) */
   const equityAt = (price: number): number => {
     if (!position) return cash;
+    if (config.futures) return cash + (position.side === 'LONG' ? price - position.entryPrice : position.entryPrice - price) * position.quantity;
     if (position.side === 'LONG') return cash + position.quantity * price;
     // SHORT 簡化模型:現金未扣除,權益 = 現金 + 未實現損益
     return cash + (position.entryPrice - price) * position.quantity;
@@ -125,8 +178,22 @@ export const runBacktestEngine = (
     stopLossPct: number,
     reason: string,
     time: number,
-    index: number
+    index: number,
+    entryPlan?: StrategyEntryPlan,
+    signalTime = time
   ) => {
+    if (config.futures?.direction && config.futures.direction !== 'BOTH' && side !== config.futures.direction) {
+      recordEvent({ type: 'WARNING', side, timestamp: time, signalTime, price: fillPrice, cancelled: true, reason: '進場取消：交易方向設定不允許' }); return;
+    }
+    if (config.futures && (time < cooldownUntil || (dailyPnl.get(dayKey(time)) ?? 0) <= -config.initialCapital * 0.01)) {
+      recordEvent({ type: 'WARNING', side, timestamp: time, signalTime, price: fillPrice, cancelled: true, reason: '進場取消：台北日內虧損達 1% 或連虧冷卻中' });
+      return;
+    }
+    const risk = resolveEntryRisk(side, fillPrice, stopLossPct, entryPlan, config.cost);
+    if ('error' in risk) {
+      recordEvent({ type: 'WARNING', side, timestamp: time, signalTime, price: fillPrice, cancelled: true, reason: `進場取消：${risk.error}` });
+      return;
+    }
     // 倉位計算與 live 引擎同一套(風險式倉位),本金基底 = 當前權益(複利)
     const sizing = calculateRiskBasedPosition({
       capitalBaseUsdt: equityAt(fillPrice),
@@ -134,20 +201,51 @@ export const runBacktestEngine = (
       maxPositionSizePct: config.maxPositionSizePct,
       maxRiskPerTradePct: config.maxRiskPerTradePct,
       precision: config.precision,
-      stopLossPct,
+      stopLossPct: risk.stopLossPct,
     });
     // 倉位過小(低於最小下單額)時放棄本次進場
-    if (sizing.reason || sizing.quantity <= 0) return;
+    if (sizing.reason || sizing.quantity <= 0) {
+      recordEvent({ type: 'WARNING', side, timestamp: time, signalTime, price: fillPrice, cancelled: true, reason: `進場取消：${sizing.reason ?? '倉位過小'}` });
+      return;
+    }
 
-    const fee = calculateFee(fillPrice, sizing.quantity, config.cost);
+    /** 100% 部位仍須留出 BUY 手續費，不能讓模擬現貨帳戶透支；數量向下捨入以免超額。 */
+    const scale = 10 ** config.precision;
+    const affordableQuantity = Math.floor(cash / (fillPrice * (1 + config.cost.feeRate)) * scale) / scale;
+    const fRisk = config.futures ? futuresEntryRisk(side, fillPrice, entryPlan, config.cost, equityAt(fillPrice),
+      config.maxRiskPerTradePct, config.maxPositionSizePct, config.precision, config.futures.leverage,
+      knownFundingBudget(funding, time - 1, side, futuresFundingHours(strategy.id, params)), stopLossPct) : null;
+    if (fRisk && 'error' in fRisk) {
+      recordEvent({ type: 'WARNING', side, timestamp: time, signalTime, price: fillPrice, cancelled: true, reason: `進場取消：${fRisk.error}` }); return;
+    }
+    let quantity = fRisk && 'quantity' in fRisk ? fRisk.quantity : side === 'LONG' ? Math.min(sizing.quantity, affordableQuantity) : sizing.quantity;
+    if (config.futures?.quantityStep) quantity = Math.floor(quantity / config.futures.quantityStep + 1e-9) * config.futures.quantityStep;
+    if (config.futures && (quantity < (config.futures.minQuantity ?? 0) || quantity * fillPrice < (config.futures.minNotional ?? 0))) {
+      recordEvent({ type: 'WARNING', side, timestamp: time, signalTime, price: fillPrice, cancelled: true, reason: '進場取消：風險倉位低於合約最小下單限制' }); return;
+    }
+    if (quantity <= 0) {
+      recordEvent({ type: 'WARNING', side, timestamp: time, signalTime, price: fillPrice, cancelled: true, reason: '進場取消：合約數量捨入後不足' }); return;
+    }
+
+    const fee = calculateFee(fillPrice, quantity, config.cost, side === 'LONG' ? 'BUY' : 'SELL');
     // 停損價:LONG 往下、SHORT 往上
-    const stopLossPrice =
-      side === 'LONG'
-        ? fillPrice * (1 - stopLossPct / 100)
-        : fillPrice * (1 + stopLossPct / 100);
+    const stopLossPrice = risk.stopLossPrice;
 
-    if (side === 'LONG') {
-      cash -= sizing.quantity * fillPrice + fee;
+    if (fRisk && 'quantity' in fRisk) {
+      const leverage = futuresLeverageForStop(side, fillPrice, quantity, stopLossPrice, config.cost.feeRate,
+        config.futures!.tiers, config.futures!.leverage, config.futures!.minLeverage ?? 1);
+      if ('error' in leverage) {
+        recordEvent({ type: 'WARNING', side, timestamp: time, signalTime, price: fillPrice, cancelled: true, reason: `進場取消：${leverage.error}` }); return;
+      }
+      initialMargin = leverage.margin;
+      entryPlan = entryPlan ? { ...entryPlan, targetPrice: fRisk.targetPrice } : undefined;
+    }
+
+    if (config.futures) {
+      cash -= fee;
+      dailyPnl.set(dayKey(time), (dailyPnl.get(dayKey(time)) ?? 0) - fee);
+    } else if (side === 'LONG') {
+      cash -= quantity * fillPrice + fee;
     } else {
       // SHORT 簡化模型:不動用現金,只扣手續費
       cash -= fee;
@@ -156,28 +254,38 @@ export const runBacktestEngine = (
     position = {
       side,
       entryPrice: fillPrice,
-      quantity: sizing.quantity,
+      quantity,
       stopLossPrice,
       entryTime: time,
       entryIndex: index,
+      entryPlan,
     };
     positionEntryFee = fee;
     positionEntryReason = reason;
+    positionFunding = 0;
+    recordEvent({ type: 'ENTRY', side, timestamp: time, signalTime, price: fillPrice, reason, stopLossPrice, targetPrice: entryPlan?.targetPrice });
   };
 
   /** 平倉:fillPrice 為套用滑價後成交價 */
-  const closePosition = (fillPrice: number, reason: string, time: number, index: number) => {
+  const closePosition = (fillPrice: number, reason: string, time: number, index: number, signalTime = time) => {
     if (!position) return;
-    const exitFee = calculateFee(fillPrice, position.quantity, config.cost);
-    const grossPnl =
+    const exitFee = calculateFee(fillPrice, position.quantity, config.cost, position.side === 'LONG' ? 'SELL' : 'BUY');
+    let grossPnl =
       position.side === 'LONG'
         ? (fillPrice - position.entryPrice) * position.quantity
         : (position.entryPrice - fillPrice) * position.quantity;
+    /** 逐倉壓力強平最多耗用該筆配置保證金及費用，不將未配置資金當成全倉抵押。 */
+    if (config.futures && reason.includes('模型強平')) grossPnl = Math.max(grossPnl, -initialMargin - positionFunding);
     const totalFee = positionEntryFee + exitFee;
-    const netPnl = grossPnl - totalFee;
+    const netPnl = grossPnl - totalFee + positionFunding;
     const entryNotional = position.entryPrice * position.quantity;
 
-    if (position.side === 'LONG') {
+    if (config.futures) {
+      cash += grossPnl - exitFee;
+      dailyPnl.set(dayKey(time), (dailyPnl.get(dayKey(time)) ?? 0) + grossPnl - exitFee);
+      lossStreak = netPnl < 0 ? lossStreak + 1 : 0;
+      if (lossStreak >= 3) { cooldownUntil = time + 6 * HOUR_MS; lossStreak = 0; }
+    } else if (position.side === 'LONG') {
       cash += position.quantity * fillPrice - exitFee;
     } else {
       cash += grossPnl - exitFee;
@@ -196,16 +304,29 @@ export const runBacktestEngine = (
       holdingBars: position.entryIndex != null ? index - position.entryIndex : 0,
       entryReason: positionEntryReason,
       exitReason: reason,
+      ...(config.futures ? { fundingPnl: positionFunding, initialMargin } : {}),
     });
 
+    recordEvent({ type: 'EXIT', side: position.side, timestamp: time, signalTime, price: fillPrice, reason });
     position = null;
     positionEntryFee = 0;
     positionEntryReason = '';
   };
 
-  for (let i = strategy.warmupBars; i < candles.length; i++) {
+  const warmupBars = strategy.warmupBarsForParams?.(params) ?? strategy.warmupBars;
+  for (let i = warmupBars; i < candles.length; i++) {
     const candle = candles[i];
     const inTradeWindow = candle.openTime >= tradeStartTime;
+    /** 整點結算先於同時刻平倉，該整點才建立的新倉不支付前一期資金費率；不假定八小時。 */
+    while (fundingIndex < funding.length && funding[fundingIndex].time <= candle.openTime) {
+      const point = funding[fundingIndex++];
+      if (position && point.time > (position as OpenPositionState).entryTime) {
+        const held = position as OpenPositionState, settlementMark = marks.get(point.time)?.open ?? candles[Math.max(0, i - 1)].close;
+        const pnl = held.quantity * settlementMark * point.rate * (held.side === 'LONG' ? -1 : 1);
+        cash += pnl; positionFunding += pnl;
+        dailyPnl.set(dayKey(point.time), (dailyPnl.get(dayKey(point.time)) ?? 0) + pnl);
+      }
+    }
 
     if (inTradeWindow && firstEvaluatedIndex === -1) {
       firstEvaluatedIndex = i;
@@ -214,51 +335,84 @@ export const runBacktestEngine = (
     // 1) 執行上一根排入的待成交動作(以當根開盤價成交)
     if (pending && inTradeWindow) {
       if (pending.kind === 'ENTRY' && !position) {
+        const { action } = pending;
         const fillPrice = applySlippage(
           candle.open,
-          pending.side === 'LONG' ? 'BUY' : 'SELL',
+          action.side === 'LONG' ? 'BUY' : 'SELL',
           config.cost
         );
-        openPosition(pending.side, fillPrice, pending.stopLossPct, pending.reason, candle.openTime, i);
+        openPosition(action.side, fillPrice, action.stopLossPct ?? config.defaultStopLossPct, action.reason,
+          candle.openTime, i, action.entryPlan, pending.signalTime);
       } else if (pending.kind === 'EXIT' && position) {
         const fillPrice = applySlippage(
           candle.open,
           (position as OpenPositionState).side === 'LONG' ? 'SELL' : 'BUY',
           config.cost
         );
-        closePosition(fillPrice, pending.reason, candle.openTime, i);
+        closePosition(fillPrice, pending.reason, candle.openTime, i, pending.signalTime);
       }
       pending = null;
     }
 
     // 2) 停損檢查(盤中觸價模擬;保守假設:停損優先於任何策略出場訊號)
+    if (position && config.futures) {
+      const pos = position as OpenPositionState, mark = marks.get(candle.openTime);
+      const liquidation = liquidationEstimate(pos.side, pos.entryPrice, pos.quantity, initialMargin, positionFunding, config.cost.feeRate, config.futures.tiers);
+      /** 小時 K 無法辨識先後：同根模型強平／停損採強平先發生的壓力情境，禁止樂觀宣告。 */
+      if (mark && liquidation != null && (pos.side === 'LONG' ? mark.low <= liquidation : mark.high >= liquidation)) {
+        const adverse = pos.side === 'LONG' ? Math.min(candle.open, candle.low, liquidation) : Math.max(candle.open, candle.high, liquidation);
+        closePosition(applySlippage(adverse, pos.side === 'LONG' ? 'SELL' : 'BUY', config.cost), '目前級距模型強平壓力情境（非歷史真實強平）', candle.openTime, i);
+      }
+    }
     if (position) {
       const pos = position as OpenPositionState;
+      /** 原生合約停損由標記價觸發；基差使停損價超出成交價範圍時取最近範圍端點，不假造精確 tick。 */
+      const stopCandle = config.futures ? marks.get(candle.openTime) ?? candle : candle;
       if (pos.stopLossPrice != null) {
-        if (pos.side === 'LONG' && candle.low <= pos.stopLossPrice) {
+        if (pos.side === 'LONG' && stopCandle.low <= pos.stopLossPrice) {
           // 開盤已跳空低於停損 → 以開盤價成交(模擬跳空損失),否則以停損價成交
-          const triggerPrice = Math.min(candle.open, pos.stopLossPrice);
+          const triggerPrice = config.futures ? Math.max(candle.low, Math.min(candle.high, candle.open, pos.stopLossPrice)) : Math.min(candle.open, pos.stopLossPrice);
           const fillPrice = applySlippage(triggerPrice, 'SELL', config.cost);
           closePosition(fillPrice, '觸及停損價,停損保護出場', candle.openTime, i);
-        } else if (pos.side === 'SHORT' && candle.high >= pos.stopLossPrice) {
-          const triggerPrice = Math.max(candle.open, pos.stopLossPrice);
+        } else if (pos.side === 'SHORT' && stopCandle.high >= pos.stopLossPrice) {
+          const triggerPrice = config.futures ? Math.min(candle.high, Math.max(candle.low, candle.open, pos.stopLossPrice)) : Math.max(candle.open, pos.stopLossPrice);
           const fillPrice = applySlippage(triggerPrice, 'BUY', config.cost);
           closePosition(fillPrice, '觸及停損價,停損保護出場', candle.openTime, i);
         }
       }
     }
 
+    if (position && config.futures) {
+      const pos = position as OpenPositionState, target = pos.entryPlan?.targetPrice;
+      const targetCandle = marks.get(candle.openTime) ?? candle;
+      if (target != null && (pos.side === 'LONG' ? targetCandle.high >= target : targetCandle.low <= target)) {
+        /** 停損已先檢查；基差／跳空時目標限定在當根成交範圍，不使用不存在的成交價。 */
+        const targetFill = Math.max(candle.low, Math.min(candle.high, target));
+        closePosition(applySlippage(targetFill, pos.side === 'LONG' ? 'SELL' : 'BUY', config.cost), '合約固定目標出場（標記價觸發／成交範圍估算）', candle.openTime, i);
+      }
+    }
+
     // 3) 策略評估(嚴禁前視:evaluate 只能讀 index 及之前的資料)
     if (inTradeWindow) {
-      const action = strategy.evaluate({
+      const context = {
         candles,
         index: i,
         indicators,
         position,
         params,
-      });
+      };
+      if (config.futures) {
+        entryDiagnostics.evaluatedBars++;
+        entryDiagnostics.phases[strategy.id === 'futures_big_fish' ? (indicators.bigFish().direction[i] === -1 ? 'UP' : 'DOWN') : futuresRegime(context).phase]++;
+      }
+      const action = strategy.evaluate(context);
+      if (config.futures && !position && action.type === 'HOLD') {
+        const reason = action.reason ?? '策略條件尚未成立';
+        entryDiagnostics.filters[reason] = (entryDiagnostics.filters[reason] ?? 0) + 1;
+      }
 
       if (action.type === 'ENTRY' && !position) {
+        if (config.futures) entryDiagnostics.signals++;
         const stopLossPct = action.stopLossPct ?? config.defaultStopLossPct;
         if (config.fillMode === 'close') {
           const fillPrice = applySlippage(
@@ -266,9 +420,9 @@ export const runBacktestEngine = (
             action.side === 'LONG' ? 'BUY' : 'SELL',
             config.cost
           );
-          openPosition(action.side, fillPrice, stopLossPct, action.reason, candle.openTime, i);
+          openPosition(action.side, fillPrice, stopLossPct, action.reason, candle.openTime, i, action.entryPlan);
         } else {
-          pending = { kind: 'ENTRY', side: action.side, stopLossPct, reason: action.reason };
+          pending = { kind: 'ENTRY', action, signalTime: candle.openTime };
         }
       } else if (action.type === 'EXIT' && position) {
         if (config.fillMode === 'close') {
@@ -279,19 +433,21 @@ export const runBacktestEngine = (
           );
           closePosition(fillPrice, action.reason, candle.openTime, i);
         } else {
-          pending = { kind: 'EXIT', reason: action.reason };
+          pending = { kind: 'EXIT', reason: action.reason, signalTime: candle.openTime };
         }
       }
     }
 
     // 4) 當根收盤權益
     if (inTradeWindow) {
-      equityCurve.push({ time: candle.openTime, equity: equityAt(candle.close) });
+      /** 永續未實現損益以標記價評價；實際進出損益仍使用成交價，不把兩種序列混算。 */
+      const valuationPrice = config.futures ? marks.get(candle.openTime)?.close ?? candle.close : candle.close;
+      equityCurve.push({ time: candle.openTime, equity: equityAt(valuationPrice) });
     }
   }
 
   // 回測結束仍有持倉 → 以最後一根收盤價強制平倉(揭露用途,避免未實現損益被忽略)
-  if (position && candles.length > 0) {
+  if (config.closeAtEnd !== false && position && candles.length > 0) {
     const lastIndex = candles.length - 1;
     const lastCandle = candles[lastIndex];
     const fillPrice = applySlippage(
@@ -305,5 +461,12 @@ export const runBacktestEngine = (
     }
   }
 
-  return { trades, equityCurve, firstEvaluatedIndex };
+  const waiting = (config.closeAtEnd === false ? pending : null) as PendingOrder | null;
+  const pendingSignal: EngineEvent | null = waiting && candles.length > 0 ? {
+    type: 'WARNING', side: waiting.kind === 'ENTRY' ? waiting.action.side : (position as OpenPositionState | null)?.side ?? 'LONG',
+    timestamp: waiting.signalTime, signalTime: waiting.signalTime, price: candles.at(-1)!.close,
+    reason: `${waiting.kind === 'ENTRY' ? '進場' : '平倉'}待下一根開盤確認：${waiting.kind === 'ENTRY' ? waiting.action.reason : waiting.reason}`,
+  } : null;
+  entryDiagnostics.pending = pending?.kind === 'ENTRY' ? 1 : 0;
+  return { trades, equityCurve, firstEvaluatedIndex, events, pendingSignal, ...(config.futures ? { entryDiagnostics } : {}) };
 };

@@ -9,7 +9,7 @@ export interface TradingviewLogEnv {
 }
 
 /** 區分「根本沒送到」與「送到但被擋」，這是排查 webhook 沒反應時唯一的依據。 */
-export type SignalStatus = 'ACCEPTED' | 'REJECTED_AUTH' | 'REJECTED_JSON' | 'NO_CHANNEL';
+export type SignalStatus = 'ACCEPTED' | 'REJECTED_AUTH' | 'REJECTED_JSON' | 'NO_CHANNEL' | 'NOTIFICATION_DISABLED' | 'UNKNOWN_MARKET' | 'EXCLUDED_SECURITY';
 
 export interface SignalLogInput {
   receivedAt: number;
@@ -62,7 +62,7 @@ export async function recordTradingviewSignal(env: TradingviewLogEnv, input: Sig
     let effectLabel: string | null = null;
 
     /** 通過驗證且能解析的訊號都要配對；Slack 頻道沒設定只是通知漏掉，不影響訊號本身的有效性。 */
-    if (input.status === 'ACCEPTED' || input.status === 'NO_CHANNEL') {
+    if (input.status === 'ACCEPTED' || input.status === 'NO_CHANNEL' || input.status === 'NOTIFICATION_DISABLED') {
       const openTrade = await findOpenTrade(db, input.market, input.symbol);
       const effect = resolveTradeEffect({ action: input.action, price: input.price }, openTrade);
       if (effect.kind === 'OPEN') {

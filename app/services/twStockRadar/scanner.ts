@@ -1,3 +1,4 @@
+import { STOCK_NOTICE_WINDOW_MS } from '../stockSignalFreshness';
 /** @file 台股 4 小時進場、日線確認雷達排程與獨立 Slack 佇列；絕不下單。 */
 import { and, desc, eq, gte, isNull, lt, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -147,7 +148,7 @@ async function deliverTwStockNotifications(db: RadarDb, env: TwStockRadarEnv) {
     const [newest] = await db.select({ barTime: twStockRadarNotifications.barTime }).from(twStockRadarNotifications)
       .where(isNull(twStockRadarNotifications.sentAt)).orderBy(desc(twStockRadarNotifications.barTime)).limit(1);
     if (!newest) return;
-    if (Date.now() >= twStockFourHourClosedAt(newest.barTime) + TW_STOCK_FOUR_HOUR_MS) {
+    if (Date.now() >= twStockFourHourClosedAt(newest.barTime) + STOCK_NOTICE_WINDOW_MS) {
       await db.delete(twStockRadarNotifications).where(isNull(twStockRadarNotifications.sentAt)); return;
     }
     await db.delete(twStockRadarNotifications).where(and(isNull(twStockRadarNotifications.sentAt),

@@ -5,6 +5,7 @@
 
 import { cn } from '../../../utils/cn';
 import type { BacktestDetail } from '../types';
+import { FUTURES_RULES_VERSION } from '../../../services/strategy/futuresRegime';
 
 interface BacktestReportProps {
   detail: BacktestDetail;
@@ -13,6 +14,15 @@ interface BacktestReportProps {
 export function BacktestReport({ detail }: BacktestReportProps) {
   const result = detail.result;
   if (!result) return null;
+
+  /** 零成交可能是進場被取消，不能一律解讀成沒有訊號；只統計報告實際保留的取消事件。 */
+  const cancellations = (result.futures?.events ?? []).filter(event => event.cancelled);
+  const diagnostics = result.futures?.diagnostics;
+  const cancelledCount = diagnostics?.cancelled ?? cancellations.length;
+  const cancellationReasons = Object.entries(diagnostics?.rejections ?? cancellations.reduce<Record<string, number>>((counts, event) => {
+    counts[event.reason] = (counts[event.reason] ?? 0) + 1;
+    return counts;
+  }, {}));
 
   // 站內配色慣例:漲(正)=紅、跌(負)=綠(台股習慣)
   const pnlColor = (value: number) => (value >= 0 ? 'text-rose-500' : 'text-emerald-600');
@@ -57,7 +67,7 @@ export function BacktestReport({ detail }: BacktestReportProps) {
     },
     {
       label: '期望值 / 筆',
-      value: `${result.expectancy >= 0 ? '+' : ''}${result.expectancy}`,
+      value: result.totalTrades ? `${result.expectancy >= 0 ? '+' : ''}${result.expectancy}` : '—',
       className: pnlColor(result.expectancy),
       hint: `均獲利 ${result.avgWin} / 均虧損 ${result.avgLoss}`,
     },
@@ -74,9 +84,21 @@ export function BacktestReport({ detail }: BacktestReportProps) {
 
   return (
     <>
-    {result.totalTrades === 0 && <p role="status" className="terminal-status warn">
-      回測已完成，但此區間沒有成交，不能計算勝率。請先比較 90～180 天及不同幣種；更短的區間可能完全沒有符合條件的訊號。
+    {result.futures?.strategyName && <p className="border rounded p-3 text-xs">本報告策略：{result.futures.strategyName}・{detail.symbol}・{detail.interval.toUpperCase()}・{new Date(detail.startTime).toLocaleString('zh-TW')} ～ {new Date(detail.endTime).toLocaleString('zh-TW')}</p>}
+    {result.futures && (result.futures.rulesVersion ?? 1) < FUTURES_RULES_VERSION && <p role="status" className="terminal-status warn">
+      這是舊規則的報告。請重新回測以套用回踩確認與槓桿上限修正；舊結果保留原計算。
     </p>}
+    {diagnostics && <p className="border rounded p-3 text-xs">
+      規則版本 {result.futures!.rulesVersion}・已評估 {diagnostics.evaluatedBars} 根收盤 1H・進場訊號 {diagnostics.signals} 次・成交 {diagnostics.filled} 次・取消 {diagnostics.cancelled} 次・等待下一根 {diagnostics.pending} 次
+    </p>}
+    {result.totalTrades === 0 && <div role="status" className="terminal-status warn block! space-y-2">
+      <p>回測已完成，0 筆成交；本金未變動，所以總報酬率為 0%。不能計算勝率、獲利因子或每筆期望值。</p>
+      {cancelledCount ? <>
+        <p>已記錄 {cancelledCount} 次進場取消：</p>
+        <ul className="list-disc pl-4">{cancellationReasons.map(([reason, count]) => <li key={reason}>{reason}・{count} 次</li>)}</ul>
+        {!diagnostics && result.futures?.eventsTruncated && <p>取消統計只涵蓋報告保留的最新事件。</p>}
+      </> : <p>此報告沒有已記錄的進場取消；需檢查盤勢與策略條件是否成立，不能用 0% 判定策略勝率。</p>}
+    </div>}
     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
       {kpis.map((kpi) => (
         <div

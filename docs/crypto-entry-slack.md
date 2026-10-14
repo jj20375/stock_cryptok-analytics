@@ -1,4 +1,8 @@
-# 虛擬幣即時進場 Slack 頻道
+# 虛擬幣訊號通知（目前停用）
+
+2026-10-04 起，`CRYPTO_SIGNAL_NOTIFICATIONS_ENABLED=false`：以下虛擬幣觀察訊號全部停用，包含舊佇列補送與 TradingView。行情／研究紀錄保留；自動掃描與新倉也停用，既有持倉保護另行保留。詳見 [股票訊號重點調整](stock-signal-focus.md)。
+
+以下是未來明確重新設為 `true` 時才適用的頻道設定。
 
 虛擬幣訊號改用獨立的 `CRYPTO_ENTRY_SLACK_CHANNEL_ID`。它涵蓋 4 小時 Gate 永續吃大魚、潛力幣雷達、4 小時波段雷達、策略引擎的虛擬幣進出場與 TradingView 外部虛擬幣訊號。股市日報繼續使用原本的 `SLACK_CHANNEL_ID`，美股潛力雷達則使用 `US_STOCK_SLACK_CHANNEL_ID`。
 

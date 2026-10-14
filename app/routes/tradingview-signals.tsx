@@ -9,7 +9,7 @@ import { SignalLogTable, TradeTable } from '../features/tradingviewSignals/Detai
 
 export const loader = loadTradingviewSignals;
 
-const MARKET_FILTERS: Array<[string, string]> = [['all', '全部'], ['crypto', '虛擬幣'], ['tw_stock', '台股']];
+const MARKET_FILTERS: Array<[string, string]> = [['all', '全部'], ['tw_stock', '台股'], ['us_stock', '美股'], ['crypto', '虛擬幣歷史']];
 
 export default function TradingviewSignalsPage() {
   const data = useLoaderData<typeof loader>();
@@ -35,7 +35,9 @@ export default function TradingviewSignalsPage() {
       <p><strong>配對規則：</strong>BUY／LONG 開多、SHORT 開空、SELL／CLOSE／EXIT 平倉；沒有持倉時的 SELL 視為開空。同方向重複進場只記第一筆，不支援加碼與反手。</p>
       <p><strong>累積報酬（複利）</strong>假設每次全額投入單一部位、依出場時間連乘；<strong>合計（等權重）</strong>則是每筆固定金額的報酬加總。兩者並列避免單一數字誤導。</p>
       <p className="opacity-70">未扣手續費、滑價與稅費，樣本少時不代表已驗證勝率。原始訊號紀錄保留 {data.signalRetentionDays} 天，配對後的交易紀錄保留 {data.tradeRetentionDays} 天。</p>
-      {!data.webhookConfigured && <p className="text-amber-800">尚未設定 TRADINGVIEW_WEBHOOK_SECRET，端點會拒絕所有請求。</p>}
+      {!data.webhookEnabled
+        ? <p className="text-amber-800">TradingView 外部訊號已停用，此頁保留歷史稽核；新的台股、美股訊號由系統雷達自行計算。</p>
+        : !data.webhookConfigured && <p className="text-amber-800">尚未設定 TRADINGVIEW_WEBHOOK_SECRET，端點會拒絕所有請求。</p>}
     </section>
 
     {data.error && <p role="alert" className="rounded border border-amber-400 bg-amber-50 p-4">{data.error}</p>}

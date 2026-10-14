@@ -122,3 +122,31 @@ test('通知標示經典吃大魚且美股頻道不 fallback 到虛擬幣頻道'
   assert.equal(usStockSlackChannel({ DB: {} as any, SLACK_API_TOKEN: 'token' } as any), null);
   assert.equal(usStockSlackChannel({ DB: {} as any, US_STOCK_SLACK_CHANNEL_ID: ' C123 ' } as any), 'C123');
 });
+
+
+test('美股缺少小時 K 不跨段拼接，歷史殘段與盤前盤後不冒充 4h', () => {
+  for (const sessionOpen of [Date.UTC(2026, 8, 15, 13, 30), Date.UTC(2026, 11, 15, 14, 30)]) {
+    const hourly = Array.from({ length: 7 }, (_, index) => {
+      const openTime = sessionOpen + index * 60 * 60_000;
+      return { openTime, closeTime: usStockHourlyClosedAt(openTime), open: 100, high: 101, low: 99, close: 100, volume: 100 };
+    });
+    const missingMorning = hourly.filter((_, index) => index !== 1);
+    const complete = aggregateUsStockFourHourCandles(missingMorning);
+    assert.equal(complete.length, 1);
+    assert.equal(complete[0].openTime, hourly[4].openTime);
+    assert.equal(complete[0].volume, 300);
+    assert.equal(aggregateUsStockFourHourCandles(hourly.filter((_, index) => index !== 5)).length, 1);
+    assert.equal(aggregateUsStockFourHourCandles([...hourly, hourly[0]]).length, 2);
+    assert.equal(aggregateUsStockFourHourCandles(hourly.map(candle => ({ ...candle, openTime: candle.openTime - 10 * 60 * 60_000 }))).length, 0);
+  }
+});
+
+test('美股即時通知拒絕尚未收盤與收盤後 35 分鐘事件，保留同根去重', () => {
+  const signal = analyzeUsStock(intradayFixture(), dailyFixture(true), intradayFixture(100), dailyFixture(true));
+  const snapshot: UsStockSnapshot = { symbol: 'AAPL', name: 'Apple', checkedAt: signal.closedAt + 8 * 60_000, signal, error: null };
+  assert.equal(signal.bigFish.timeframe, '4h');
+  assert.equal(selectUsStockNotice(snapshot, null), 'BIG_FISH');
+  assert.equal(selectUsStockNotice(snapshot, snapshot), null);
+  assert.equal(selectUsStockNotice({ ...snapshot, checkedAt: signal.closedAt - 1 }, null), null);
+  assert.equal(selectUsStockNotice({ ...snapshot, checkedAt: signal.closedAt + 35 * 60_000 }, null), null);
+});

@@ -1,3 +1,4 @@
+import { cryptoSignalSlackChannel, type CryptoSignalNotificationEnv } from '../cryptoSignalNotifications';
 /**
  * @file 4 小時收盤後分片掃描永續 Mark Price；通知與可選 Bitget 合約交易共用同一根已收盤訊號。
  * 【交易副作用】最新根的進場／出場訊號會交給 processCryptoFuturesSignal，依使用者設定在 Demo 或 LIVE 下單；
@@ -16,7 +17,7 @@ import { processCryptoFuturesSignal } from '../cryptoAutoTrading/engine';
 import type { CryptoAutoTradeSignal } from '../cryptoAutoTrading/types';
 
 /** Slack 權杖與頻道只由 Worker secret 注入；公開 Binance／Gate 行情都不需要 API key。 */
-export interface BinancePerpEnv {
+export interface BinancePerpEnv extends CryptoSignalNotificationEnv {
   DB: Parameters<typeof drizzle>[0];
   BINANCE_PERP_RADAR_ENABLED?: string;
   SLACK_API_TOKEN?: string;
@@ -36,7 +37,7 @@ const SCAN_CONCURRENCY = 6;
 const NOTIFICATIONS_PER_TICK = 1;
 /** 純通知工作最多持有租約四十五秒；與分片掃描共用鎖，避免同一筆被並行送出兩次。 */
 const NOTIFICATION_LEASE_MS = 45 * 1000;
-export const cryptoEntrySlackChannel = (env: BinancePerpEnv) => env.CRYPTO_ENTRY_SLACK_CHANNEL_ID?.trim() || null;
+export const cryptoEntrySlackChannel = (env: BinancePerpEnv) => cryptoSignalSlackChannel(env);
 
 async function collectScan(startedAt: number, notificationsEnabled: boolean, shardIndex: number) {
   const cutoff = Math.floor(startedAt / PERP_BAR_MS) * PERP_BAR_MS;

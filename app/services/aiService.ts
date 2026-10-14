@@ -94,7 +94,8 @@ export async function getOpenAIResponse(prompt: string, options: AIResponseOptio
  */
 export async function getGeminiResponse(prompt: string, options: AIResponseOptions = {}, env: any = {}) {
     const apiKey = env.GEMINI_API_KEY || process.env.GEMINI_API_KEY;
-    const modelName = env.AI_MODEL || process.env.AI_MODEL || "gemini-2.0-flash";
+    // 未指定 AI_MODEL 時使用 3.1 Flash-Lite；雲端與本機的明確模型設定仍優先。
+    const modelName = env.AI_MODEL || process.env.AI_MODEL || "gemini-3.1-flash-lite";
 
     if (!apiKey) throw new Error("Gemini API key not configured");
 

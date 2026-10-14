@@ -1,3 +1,4 @@
+import { isTwStockOrEtfCode } from './securities';
 /** @file 證交所動態候選與 Yahoo 台股已收盤 K 線；不讀券商帳戶或交易憑證。 */
 import { aggregateTwStockFourHourCandles, twStockHourlyClosedAt } from './candles';
 import { TW_STOCK_RADAR_RULES, type TwStockCandle, type TwStockTicker } from './types';
@@ -36,7 +37,7 @@ export async function fetchTwStockUniverse(): Promise<TwStockTicker[]> {
       const change = numeric(row[10]);
       const sign = String(row[9] ?? '').includes('-') ? -1 : 1;
       const previous = price - sign * change;
-      if (!/^[1-9]\d{3}$/.test(code) || ![price, volume, turnover].every(Number.isFinite) || price <= 0) return [];
+      if (!isTwStockOrEtfCode(code) || ![price, volume, turnover].every(Number.isFinite) || price <= 0) return [];
       return [{ symbol: `${code}.TW`, name: String(row[1] ?? code).trim(), price,
         changePct: previous > 0 ? sign * change / previous * 100 : 0, volume,
         averageVolume3m: turnover / price } satisfies TwStockTicker];
@@ -99,7 +100,8 @@ export async function fetchTwStockCandles(symbol: string, interval: '4h' | '1d',
   const candles: TwStockCandle[] = [];
   for (let index = 0; index < result.timestamp.length; index++) {
     const openTime = result.timestamp[index] * 1000;
-    const closeTime = interval === '4h' ? twStockHourlyClosedAt(openTime) : openTime + 5 * 60 * 60 * 1000;
+    // 台股日線在 13:30 收盤；收盤後八分鐘抓取，不再誤當成 14:00 才收盤。
+    const closeTime = interval === '4h' ? twStockHourlyClosedAt(openTime) : openTime + 4.5 * 60 * 60 * 1000;
     const open = quote.open?.[index]; const high = quote.high?.[index];
     const low = quote.low?.[index]; const close = quote.close?.[index];
     if ([open, high, low, close].some(value => value == null || !Number.isFinite(value)) || closeTime > cutoff) continue;

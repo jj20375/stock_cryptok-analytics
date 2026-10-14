@@ -46,6 +46,9 @@ export function AppLayout({ children }: { children: ReactNode }) {
           <Link to="/dashboard" className={navLinkClass("/dashboard")} title="交易績效 Dashboard">
             <LayoutGrid size={20} />
           </Link>
+          <Link to="/trade-journal" className={navLinkClass('/trade-journal')} title="Bitget 交易復盤" aria-label="Bitget 交易復盤">
+            <List size={20} />
+          </Link>
           <Link to="/stock-analysis" className={navLinkClass("/stock-analysis")} title="個股深度分析">
             <TrendingUp size={20} />
           </Link>
@@ -58,6 +61,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
           <Link to="/backtest" className={navLinkClass("/backtest")} title="策略回測 Backtest">
             <FlaskConical size={20} />
           </Link>
+          <Link to="/crypto-futures" className={navLinkClass('/crypto-futures')} title="合約專用策略" aria-label="合約專用策略"><Shield size={20} /></Link>
           <Link to="/warroom" className={navLinkClass('/warroom')} title="戰情室">
             <Shield size={20} />
           </Link>
@@ -73,6 +77,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
           <Link to="/tw-stock-radar" className={navLinkClass('/tw-stock-radar')} title="台股潛力雷達" aria-label="台股潛力雷達">
             <Radar size={20} />
           </Link>
+          <Link to="/tw-daytrade" className={navLinkClass('/tw-daytrade')} title="台股當沖 Top 10" aria-label="台股當沖 Top 10"><Activity size={20} /></Link>
           <Link to="/tradingview-signals" className={navLinkClass('/tradingview-signals')} title="TradingView 訊號績效" aria-label="TradingView 訊號績效">
             <Satellite size={20} />
           </Link>
@@ -105,6 +110,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
 
       {/* Mobile Bottom Navigation */}
       <nav className="trading-mobile-nav fixed bottom-0 left-0 w-full h-16 flex md:hidden items-center justify-around px-4 z-30">
+        <Link to="/crypto-futures" className={navLinkClass('/crypto-futures')} title="合約專用策略" aria-label="合約專用策略"><Shield size={20} /></Link>
         <Link to="/" className={navLinkClass("/")}>
           <Activity size={20} />
         </Link>
@@ -129,6 +135,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
         <Link to="/tw-stock-radar" className={navLinkClass('/tw-stock-radar')} title="台股潛力雷達" aria-label="台股潛力雷達">
           <Radar size={20} />
         </Link>
+        <Link to="/tw-daytrade" className={navLinkClass('/tw-daytrade')} title="台股當沖 Top 10" aria-label="台股當沖 Top 10"><Activity size={20} /></Link>
         <Link to="/tradingview-signals" className={navLinkClass('/tradingview-signals')} title="TradingView 訊號績效" aria-label="TradingView 訊號績效">
           <Satellite size={20} />
         </Link>

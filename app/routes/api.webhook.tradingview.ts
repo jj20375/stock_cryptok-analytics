@@ -1,3 +1,4 @@
+import { cryptoNewEntriesAllowed } from '../services/cryptoActivityPolicy';
 /**
  * 【詳細繁體中文註解】：TradingView Webhook 接收端點 — 外部訊號通知(僅推播 Slack,不下單)
  *
@@ -26,27 +27,15 @@
  *    {{strategy.order.action}} 只有「策略(strategy)」型腳本才有 buy/sell 值,
  *    純指標(indicator)腳本請把 action 欄位改成寫死的固定文字(例如每個警報條件各自設一個)。
  * 4. 選用欄位 "market":"tw_stock" 可將訊號改送台股頻道(TW_STOCK_SLACK_CHANNEL_ID),
- *    省略此欄位時預設沿用虛擬幣即時進場頻道,維持既有 Alert 的相容性。
+ *    美股使用 "market":"us_stock"；也可帶 "exchange":"{{exchange}}" 判斷市場。
+ *    無法辨識的市場只保留稽核，虛擬幣訊號通知預設停用。
  */
 
 import type { ActionFunctionArgs, LoaderFunctionArgs } from 'react-router';
-import { sendSlackPost } from '../services/slackService';
 import { recordTradingviewSignal, shouldLogRejection } from '../services/tradingview/signalLog';
-import { processCryptoFuturesSignal } from '../services/cryptoAutoTrading/engine';
+import { deliverTradingviewWebhook } from '../services/tradingview/webhookDelivery';
+import { resolveTradingviewMarket } from '../services/tradingview/market';
 import { tradingViewPayloadToAutoSignal } from '../services/cryptoAutoTrading/signal';
-
-/** Slack mrkdwn 的三個特殊字元須跳脫；symbol/note 來自外部 TradingView 訊息，不可信任其格式。 */
-const escapeMrkdwn = (value: string) => value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
-
-// 允許的訊號方向(僅供顯示分類用,未列出的值仍會被接受並原樣顯示,不因此拒絕請求)
-const ACTION_LABELS: Record<string, string> = {
-  BUY: '🟢 買進/做多',
-  SELL: '🔴 賣出/做空',
-  LONG: '🟢 做多',
-  SHORT: '🔴 做空',
-  CLOSE: '⚪ 平倉',
-  EXIT: '⚪ 出場',
-};
 
 const jsonResponse = (body: unknown, status: number = 200) => Response.json(body, { status });
 
@@ -58,6 +47,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
 export async function action({ request, params, context }: ActionFunctionArgs) {
   const env = (context as any).cloudflare.env;
+  // 已停止 TradingView 訂閱與外部警報；在讀取 payload、D1 或通知副作用前直接退出。
+  if (env.TRADINGVIEW_WEBHOOK_ENABLED !== 'true') {
+    return jsonResponse({ error: 'TradingView Webhook 已停用；股票訊號由系統自行計算' }, 410);
+  }
   /** 以進站時間為準，避免 Slack 或資料庫耗時影響交易配對的時間序。 */
   const receivedAt = Date.now();
 
@@ -86,8 +79,9 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
   let payload: Record<string, unknown>;
   try {
     payload = JSON.parse(rawBody);
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('訊息需為 JSON 物件');
   } catch {
-    console.error('❌ [TradingView Webhook] 訊息不是合法 JSON,原始內容:', rawBody.slice(0, 200));
+    console.error('[TradingView Webhook] 訊息不是合法 JSON 物件');
     await recordTradingviewSignal(env, {
       receivedAt, market: 'unknown', symbol: '未知', action: null, price: null, note: null,
       status: 'REJECTED_JSON', slackOk: null, rawBody, error: '訊息內容不是合法 JSON',
@@ -98,63 +92,14 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     );
   }
 
-  const symbol = typeof payload.symbol === 'string' ? payload.symbol : '未提供代號';
-  const actionRaw = typeof payload.action === 'string' ? payload.action.toUpperCase() : null;
-  const price = typeof payload.price === 'number' ? payload.price : null;
-  const note = typeof payload.note === 'string' ? payload.note : null;
-  const actionLabel = actionRaw ? (ACTION_LABELS[actionRaw] ?? `⚠️ ${actionRaw}`) : '⚠️ 未提供方向';
-  /** 未帶 market 欄位時預設 crypto，維持既有虛擬幣 Alert 相容性；台股改用 NT$ 顯示價格。 */
-  const market = typeof payload.market === 'string' ? payload.market.toLowerCase() : 'crypto';
-  const priceCurrency = market === 'tw_stock' ? 'NT$' : '$';
-
-  // 【詳細繁體中文註解:外部 API 副作用】此處呼叫 Slack chat.postMessage 對外發送訊息,
-  // 失敗只記錄 log、不視為整體請求失敗 — 避免 Slack 暫時性問題導致 TradingView 誤判
-  // webhook 失敗而重試轟炸。
-  const slackToken = env.SLACK_API_TOKEN || process.env.SLACK_API_TOKEN;
-  /** market 決定投遞頻道：台股訊號走「台股即時進場價格」，其餘沿用虛擬幣即時進場頻道；兩者都不 fallback 到一般報表頻道。 */
-  const cryptoChannel = env.CRYPTO_ENTRY_SLACK_CHANNEL_ID || process.env.CRYPTO_ENTRY_SLACK_CHANNEL_ID;
-  const twStockChannel = env.TW_STOCK_SLACK_CHANNEL_ID || process.env.TW_STOCK_SLACK_CHANNEL_ID;
-  const slackChannel = market === 'tw_stock' ? twStockChannel : cryptoChannel;
-  /** 以實際投遞的頻道回推 market，確保績效分組與 Slack 分流一致，不被拼錯的值汙染。 */
-  const resolvedMarket = market === 'tw_stock' ? 'tw_stock' : 'crypto';
-  /** 僅 crypto payload 可轉入 Bitget 合約引擎；台股與格式不完整訊號仍只保留原本通知。 */
-  const autoTradeSignal = resolvedMarket === 'crypto'
-    ? tradingViewPayloadToAutoSignal(payload, receivedAt)
-    : null;
-  let slackOk: boolean | null = null;
-  if (slackToken && slackChannel) {
-    /** 卡片樣式跟其他雷達（潛力幣／波段／永續）對齊，靠 📡 圖示與「TradingView」字樣區分來源。 */
-    const title = `📡 ${escapeMrkdwn(symbol)}｜TradingView ${actionLabel}`.slice(0, 150);
-    const fallback = `${title}${price != null ? `｜進場參考 ${priceCurrency}${price}` : ''}${note ? `｜${note.slice(0, 100)}` : ''}`;
-    const blocks: Array<Record<string, unknown>> = [
-      { type: 'header', text: { type: 'plain_text', text: title, emoji: true } },
-      { type: 'section', fields: [
-        { type: 'mrkdwn', text: `*方向*\n${escapeMrkdwn(actionLabel)}` },
-        ...(price != null ? [{ type: 'mrkdwn', text: `*進場參考價*\n${priceCurrency}${price}` }] : []),
-      ] },
-      ...(note ? [{ type: 'section' as const, text: { type: 'mrkdwn' as const, text: escapeMrkdwn(note.slice(0, 180)) } }] : []),
-      { type: 'context', elements: [{ type: 'mrkdwn', text: '外部策略訊號｜Bitget 合約自動交易須在設定頁另行開啟' }] },
-    ];
-    slackOk = await sendSlackPost(slackToken, slackChannel, { text: fallback, blocks });
-    if (!slackOk) console.error('🔥 [TradingView Webhook] Slack 推播失敗,訊號未送達');
-  } else {
-    console.warn('⚠️ [TradingView Webhook] 未設定 Slack,收到訊號但無處推播');
-  }
-
-  /** 無論 Slack 成功與否都要落地：績效統計看的是訊號本身，不是通知是否送達。 */
-  await recordTradingviewSignal(env, {
-    receivedAt, market: resolvedMarket, symbol, action: actionRaw, price, note,
-    status: slackToken && slackChannel ? 'ACCEPTED' : 'NO_CHANNEL', slackOk, rawBody,
-    error: slackOk === false ? 'Slack 推播失敗' : null,
+  const autoSignal = resolveTradingviewMarket(payload) === 'crypto' ? tradingViewPayloadToAutoSignal(payload, receivedAt) : null;
+  const futuresQueued = Boolean(autoSignal && (autoSignal.action === 'SELL' || cryptoNewEntriesAllowed(env)));
+  /** TradingView 三秒即中止慢請求；將 Slack、D1 與既有合約處理放入 waitUntil 後立即回覆。 */
+  const task = deliverTradingviewWebhook(env, payload, rawBody, receivedAt).catch(error => {
+    console.error('[TradingView Webhook] 背景處理失敗:', error instanceof Error ? error.message : '未知錯誤');
   });
-
-  if (autoTradeSignal) {
-    /** TradingView 約三秒即中止慢 Webhook；回覆前只排入 waitUntil，交易所 I/O 在背景完成。 */
-    const futuresTask = processCryptoFuturesSignal(env, autoTradeSignal);
-    const executionContext = (context as any).cloudflare.ctx as { waitUntil?: (promise: Promise<unknown>) => void } | undefined;
-    if (executionContext?.waitUntil) executionContext.waitUntil(futuresTask);
-    else await futuresTask;
-  }
-
-  return jsonResponse({ success: true, futuresQueued: Boolean(autoTradeSignal) });
+  const executionContext = (context as any).cloudflare.ctx as { waitUntil?: (promise: Promise<unknown>) => void } | undefined;
+  if (executionContext?.waitUntil) executionContext.waitUntil(task);
+  else await task;
+  return jsonResponse({ success: true, notificationQueued: true, futuresQueued });
 }

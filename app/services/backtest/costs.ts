@@ -1,3 +1,4 @@
+/** @file 回測交易費、滑價及可調賣出稅率；純計算成本，不假設所有商品適用同一台股稅率。 */
 /**
  * 【詳細繁體中文註解】：回測交易成本模型(手續費 + 滑價)
  *
@@ -15,6 +16,8 @@ export interface CostModel {
   feeRate: number;
   /** 滑價基點(5 = 0.05%) */
   slippageBps: number;
+  /** 只在 SELL 收取；台股股票研究預設 0.003，ETF／當沖等由使用者調整，舊回測缺值維持零。 */
+  sellTaxRate?: number;
 }
 
 /** 預設成本模型:Binance 現貨 taker 費率 + 5 bps 滑價 */
@@ -34,6 +37,6 @@ export const applySlippage = (price: number, direction: 'BUY' | 'SELL', model: C
 };
 
 /** 單邊手續費(以成交名目金額計) */
-export const calculateFee = (fillPrice: number, quantity: number, model: CostModel): number => {
-  return fillPrice * quantity * model.feeRate;
+export const calculateFee = (fillPrice: number, quantity: number, model: CostModel, direction?: 'BUY' | 'SELL'): number => {
+  return fillPrice * quantity * (model.feeRate + (direction === 'SELL' ? model.sellTaxRate ?? 0 : 0));
 };

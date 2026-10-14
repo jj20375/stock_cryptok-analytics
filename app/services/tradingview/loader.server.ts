@@ -33,7 +33,8 @@ export async function loadTradingviewSignals({ request, context }: LoaderFunctio
     signalRetentionDays: Math.round(SIGNAL_RETENTION_MS / 86_400_000),
     tradeRetentionDays: Math.round(TRADE_RETENTION_MS / 86_400_000),
     /** 只揭露是否已設定，token 與頻道 ID 絕不傳給瀏覽器。 */
-    webhookConfigured: Boolean(env.TRADINGVIEW_WEBHOOK_SECRET),
+    webhookEnabled: env.TRADINGVIEW_WEBHOOK_ENABLED === 'true',
+    webhookConfigured: env.TRADINGVIEW_WEBHOOK_ENABLED === 'true' && Boolean(env.TRADINGVIEW_WEBHOOK_SECRET),
   };
   try {
     const db = drizzle(env.DB);

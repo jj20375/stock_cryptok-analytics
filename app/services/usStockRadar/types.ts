@@ -1,13 +1,13 @@
 /** @file 美股 4 小時進場與日線確認雷達的資料契約；只描述公開行情觀察，不代表交易或下單。 */
 import type { Candle } from '../strategy/types';
-import type { BigFishSignal } from '../potentialRadar/bigFish';
+import type { BigFishSignal } from '../strategy/bigFish';
 
 export const US_STOCK_FOUR_HOUR_MS = 4 * 60 * 60 * 1000;
 export const US_STOCK_DAY_MS = 24 * 60 * 60 * 1000;
 
 /** 門檻是待樣本外驗證的美股多頭觀察假設；分數只供同版本排序，不是勝率。 */
 export const US_STOCK_RADAR_RULES = {
-  version: 'us-4h-daily-v2-big-fish-2.0',
+  version: 'us-4h-daily-v3-session-big-fish-2.0',
   /** 合成 4 小時歷史至少 220 根，確保 EMA200 已暖機並可判斷金叉。 */
   minFourHourBars: 220,
   /** 日線至少 55 根，才能計算 EMA20／EMA50 與一個月相對強弱。 */

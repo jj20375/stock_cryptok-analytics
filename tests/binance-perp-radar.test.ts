@@ -163,7 +163,7 @@ test('Binance Mark Price 分片進場會寫入 Slack 佇列；失敗後同根補
       throw new Error(`非預期外部請求：${url.pathname}`);
     };
     const env: BinancePerpEnv = {
-      DB: db, BINANCE_PERP_RADAR_ENABLED: 'true', SLACK_API_TOKEN: 'test-token', CRYPTO_ENTRY_SLACK_CHANNEL_ID: 'test-channel',
+      DB: db, BINANCE_PERP_RADAR_ENABLED: 'true', SLACK_API_TOKEN: 'test-token', CRYPTO_SIGNAL_NOTIFICATIONS_ENABLED: 'true', CRYPTO_ENTRY_SLACK_CHANNEL_ID: 'test-channel',
     };
     const cutoff = Math.floor(Date.now() / PERP_BAR_MS) * PERP_BAR_MS;
     const shardIndex = getPerpShardIndex('BTWUSDT', cutoff);

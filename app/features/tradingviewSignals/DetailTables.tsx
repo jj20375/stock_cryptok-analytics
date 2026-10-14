@@ -1,3 +1,4 @@
+import { tradingviewMarketLabel } from '../../services/tradingview/market';
 /** @file 交易明細與原始訊號 log 表格；未平倉與被拒絕的請求都必須看得到，不隱藏失敗樣本。 */
 import type { TradeRecord } from '../../services/tradingview/performance';
 import type { SignalLogRow } from '../../services/tradingview/loader.server';
@@ -11,6 +12,9 @@ const STATUS_LABELS: Record<string, string> = {
   REJECTED_AUTH: '密鑰不符（已拒絕）',
   REJECTED_JSON: '訊息非合法 JSON',
   NO_CHANNEL: '已接收，但未設定 Slack 頻道',
+  NOTIFICATION_DISABLED: '已接收，虛擬幣訊號通知已停用',
+  UNKNOWN_MARKET: '已接收，市場無法辨識（未推播）',
+  EXCLUDED_SECURITY: '權證或非股票／ETF（不推播、不計入績效）',
 };
 
 export function TradeTable({ trades }: { trades: TradeRecord[] }) {
@@ -25,7 +29,7 @@ export function TradeTable({ trades }: { trades: TradeRecord[] }) {
         <th key={label} className="py-3 pr-4 font-medium">{label}</th>)}</tr></thead>
       <tbody>{trades.map(trade => <tr key={trade.id} className="border-b border-black/10 align-top">
         <td className="py-3 pr-4"><strong>{trade.symbol}</strong>
-          <small className="block opacity-60">{trade.market === 'tw_stock' ? '台股' : '虛擬幣'}</small></td>
+          <small className="block opacity-60">{tradingviewMarketLabel(trade.market)}</small></td>
         <td className="py-3 pr-4">{trade.direction === 'LONG' ? '🟢 多單' : '🔴 空單'}</td>
         <td className="py-3 pr-4">{priceText(trade.entryPrice, trade.market)}
           <small className="block opacity-60">{formatTime(trade.entryAt)}</small></td>

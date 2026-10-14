@@ -1,3 +1,4 @@
+import { cryptoSignalSlackChannel, type CryptoSignalNotificationEnv } from '../cryptoSignalNotifications';
 /** @file 獨立 15 分排程：有限批次抓取、租約防重疊、原子保存入選與可重試的 Slack 通知；絕不下單。 */
 import { and, desc, eq, gte, isNull, lt, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -12,7 +13,7 @@ import { DAY_MS, FOUR_HOUR_MS, QUARTER_MS, RADAR_RULES, isRadarCandidate, type R
   type RadarRun, type RadarSnapshot } from './types';
 
 /** Slack 權杖及頻道僅由 Worker secret 提供；掃描程式不讀取本機設定檔或交易憑證。 */
-export interface PotentialEnv {
+export interface PotentialEnv extends CryptoSignalNotificationEnv {
   DB: Parameters<typeof drizzle>[0];
   POTENTIAL_RADAR_ENABLED?: string;
   SLACK_API_TOKEN?: string;
@@ -32,7 +33,7 @@ const SCAN_CONCURRENCY = 5;
 const MAX_NOTIFICATIONS_PER_RUN = 3;
 /** 每檔需兩個 Gate 公開請求；只精算前三個候選，連同 D1 與 Slack 保持在單輪資源預算內。 */
 const MAX_DERIVATIVE_CANDIDATES = 3;
-export const potentialCryptoSlackChannel = (env: PotentialEnv) => env.CRYPTO_ENTRY_SLACK_CHANNEL_ID?.trim() || null;
+export const potentialCryptoSlackChannel = (env: PotentialEnv) => cryptoSignalSlackChannel(env);
 
 function parseSnapshot(value: string): RadarSnapshot | null {
   try { return JSON.parse(value) as RadarSnapshot; }

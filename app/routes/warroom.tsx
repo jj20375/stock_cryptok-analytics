@@ -1,3 +1,6 @@
+/** @file 虛擬幣戰情室；試算欄位須有效，無下單副作用。 */
+import { numericFieldError } from "../utils/numericInput";
+import { NumericInput } from "../components/NumericInput";
 /** @component 戰情室整合行情、訊號與獨立模擬研究；登入後只讀，不觸發交易。 */
 import { useState } from 'react';
 import { redirect, type LoaderFunctionArgs } from 'react-router';
@@ -26,6 +29,7 @@ export default function WarRoomPage() {
   const longs = healthy.filter(c => c.signal === 'LONG').length;
   const shorts = healthy.filter(c => c.signal === 'SHORT').length;
   const unavailable = coins.length - healthy.length;
+  const invalidPreview = !!numericFieldError(marginUsdt, { min: 1, max: 1000000, step: 0.01 }) || !!numericFieldError(leverage, { min: 1, max: 125, step: 1 });
   const sorted = [...coins].filter(c => filter === 'ALL' || c.signal === filter).sort((a, b) =>
     Number(!!a.error) - Number(!!b.error) || Number(a.signal === 'HOLD') - Number(b.signal === 'HOLD'));
   return <AppLayout><div className="trading-dashboard">
@@ -54,9 +58,9 @@ export default function WarRoomPage() {
     <div className="terminal-toolbar"><div className="flex flex-wrap gap-3">
       <label className="terminal-muted">K 線週期 <select className="terminal-input" value={interval} onChange={e => setInterval(e.target.value)}>{['1h', '4h', '1d'].map(v => <option key={v}>{v}</option>)}</select></label>
       <label className="terminal-muted">訊號 <select className="terminal-input" value={filter} onChange={e => setFilter(e.target.value)}><option value="ALL">全部</option><option value="LONG">偏多</option><option value="SHORT">偏空</option><option value="HOLD">觀望</option></select></label>
-    </div><div className="flex flex-wrap gap-3"><label className="terminal-muted">試算保證金 USDT <input className="terminal-input w-24" type="number" min="1" max="1000000" value={marginUsdt} onChange={e => setMarginUsdt(Math.min(1_000_000, Math.max(1, Number(e.target.value) || 1)))} /></label>
-      <label className="terminal-muted">槓桿 <input className="terminal-input w-20" type="number" min="1" max="125" value={leverage} onChange={e => setLeverage(Math.min(125, Math.max(1, Number(e.target.value) || 1)))} /></label></div></div>
-    <div className="terminal-cards">{sorted.map(coin => <div key={coin.symbol}><CoinSignalCard coin={coin} marginUsdt={marginUsdt} leverage={leverage} /></div>)}
+    </div><div className="flex flex-wrap gap-3"><label className="terminal-muted">試算保證金 USDT <NumericInput className="terminal-input w-24"  min="1" max="1000000" value={marginUsdt} onValueChange={setMarginUsdt} step="0.01" label="試算保證金 USDT" /></label>
+      <label className="terminal-muted">槓桿 <NumericInput className="terminal-input w-20"  min="1" max="125" value={leverage} onValueChange={setLeverage} step="1" label="試算槓桿" /></label></div></div>
+    <div className="terminal-cards">{!invalidPreview && sorted.map(coin => <div key={coin.symbol}><CoinSignalCard coin={coin} marginUsdt={marginUsdt} leverage={leverage} /></div>)}
       {!sorted.length && <p className="terminal-empty">{loading ? '正在載入訊號…' : '目前沒有符合條件的標的'}</p>}</div>
     <p className="terminal-footer">訊號來自已收盤現貨行情，資金費率另取 Binance 永續。合約爆倉價是簡化逐倉試算，實際金額以交易所為準。策略尚須歷史及樣本外驗證，本頁不執行下單。</p>
   </div></AppLayout>;

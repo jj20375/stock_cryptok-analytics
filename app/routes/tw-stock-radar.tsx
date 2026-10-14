@@ -1,6 +1,6 @@
 /** @file 台股潛力雷達頁：顯示 4 小時經典吃大魚、日線確認、0050 相對強弱與研究績效。 */
 import { useEffect, useMemo, useState } from 'react';
-import { useLoaderData, useRevalidator } from 'react-router';
+import { Link, useLoaderData, useRevalidator } from 'react-router';
 import { AppLayout } from '../components/AppLayout';
 import { TwStockChartDrawer } from '../features/twStockRadar/TwStockChartDrawer';
 import { UsStockPerformancePanel } from '../features/usStockRadar/PerformancePanel';
@@ -51,6 +51,7 @@ export default function TwStockRadarPage() {
       <p><strong>排程：</strong>{data.enabled ? '每 15 分鐘輕量檢查，只在 13:00 或 13:30 產生新收盤段時完整掃描' : '尚未啟用'}；休市不沿用舊 K 線製造新訊號。</p>
       <p><strong>Slack：</strong>{data.slackConfigured ? '已連接「台股即時進場價格」頻道；只保留最新批次，過期排隊訊號會捨棄。' : '雷達可運作；台股獨立頻道尚未設定，因此目前不會發送。'}</p>
       <p className="opacity-65">分數代表條件符合程度，不是上漲機率；系統只觀察公開收盤行情，不會自動下單。</p>
+      <Link to="/tw-daytrade" className="inline-block font-semibold underline">查看 15 分線台股當沖 Top 10 →</Link>
     </section>
 
     {data.error && <p role="alert" className="rounded border border-red-400 bg-red-50 p-4">{data.error}</p>}

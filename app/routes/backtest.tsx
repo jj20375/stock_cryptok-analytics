@@ -1,12 +1,12 @@
 /**
- * 【詳細繁體中文註解】：策略回測頁
+ * @file 策略回測與 Demo 自動化入口；登入者以獨立授權控制雲端盯盤。
  *
  * 版面:左欄 = 回測設定表單 + 歷史回測列表;右欄 = 績效 KPI + 權益曲線 + K 線標記 + 交易明細。
  * 執行流程(useBacktest hook):建立任務 → 輪詢補資料 → 引擎計算 → 呈現結果。
  */
 
 import { useState } from 'react';
-import { redirect, useSearchParams, type LoaderFunctionArgs } from 'react-router';
+import { redirect, useSearchParams, useLocation, Link, type LoaderFunctionArgs } from 'react-router';
 import { AlertTriangle, FlaskConical, RefreshCw } from 'lucide-react';
 import { AppLayout } from '../components/AppLayout';
 import { getUserId } from '../utils/auth';
@@ -19,6 +19,9 @@ import { TradeListTable } from '../features/backtest/components/TradeListTable';
 import { BacktestKlinePanel } from '../features/backtest/components/BacktestKlinePanel';
 import type { BacktestTrade } from '../features/backtest/types';
 import { cn } from '../utils/cn';
+import { FuturesReport } from '../features/backtest/components/FuturesReport';
+import { FuturesDemoPanel } from '../features/backtest/components/FuturesDemoPanel';
+import { FuturesAutomationPanel } from '../features/backtest/components/FuturesAutomationPanel';
 
 export async function loader({ request, context }: LoaderFunctionArgs) {
   const env = (context as any).cloudflare.env;
@@ -29,6 +32,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
 }
 
 export default function BacktestPage() {
+  const futuresPage = useLocation().pathname === '/crypto-futures';
   const {
     strategies,
     history,
@@ -69,12 +73,14 @@ export default function BacktestPage() {
         <header className="flex items-center gap-3 border-b border-[#141414] pb-3">
           <FlaskConical size={22} />
           <div>
-            <h1 className="text-xl font-bold font-serif leading-none">策略回測</h1>
+            <h1 className="text-xl font-bold font-serif leading-none">{futuresPage ? '合約專用策略研究' : '策略回測'}</h1>
             <p className="text-[11px] font-mono opacity-50 mt-1">
-              歷史重放驗證策略體質 — 加密貨幣短線(15m/1h/4h)與虛擬幣概念美股(日線)
+              {futuresPage ? 'Bitget USDT 永續・1H合約策略・吃大魚僅做多／其他策略支援多空・原有策略保留' : '歷史重放驗證策略體質 — 加密貨幣短線與股票日線'}
             </p>
           </div>
         </header>
+        <Link to={futuresPage ? '/backtest' : '/crypto-futures'} className="text-sm underline">{futuresPage ? '原有策略回測' : '前往合約專用策略'}</Link>
+        {futuresPage && <><FuturesAutomationPanel /><FuturesDemoPanel /></>}
 
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
           {/* 左欄:設定 + 歷史 */}
@@ -85,7 +91,8 @@ export default function BacktestPage() {
               extraUsTickers={usStockTickers}
               initialMarket={initialMarket as 'CRYPTO' | 'US' | 'TW' | null}
               initialSymbol={initialSymbol}
-              initialStrategyId={initialStrategyId}
+              initialStrategyId={initialStrategyId ?? (futuresPage ? 'futures_trend_retest' : null)}
+              initialFutures={futuresPage}
               onSubmit={runBacktestFlow}
             />
 
@@ -128,8 +135,7 @@ export default function BacktestPage() {
                               result.totalReturnPct >= 0 ? 'text-rose-500' : 'text-emerald-600'
                             )}
                           >
-                            {result.totalReturnPct >= 0 ? '+' : ''}
-                            {result.totalReturnPct}%
+                            {result.totalTrades === 0 ? '未成交' : `${result.totalReturnPct >= 0 ? '+' : ''}${result.totalReturnPct}%`}
                           </span>
                         )}
                       </div>
@@ -181,20 +187,20 @@ export default function BacktestPage() {
                     initialCapital={detail.result.initialCapital}
                   />
                 )}
-                <BacktestKlinePanel
+                {detail.result?.futures ? <FuturesReport detail={detail} klines={klines} /> : <BacktestKlinePanel
                   klines={klines}
                   trades={trades}
                   selectedTrade={selectedTrade}
                   truncated={klinesTruncated}
-                />
+                />}
                 <TradeListTable
                   trades={trades}
                   selectedTradeId={selectedTrade?.id ?? null}
                   onSelectTrade={setSelectedTrade}
                 />
                 <p className="text-[10px] font-mono opacity-40 leading-relaxed">
-                  模擬假設:同根 K 線停損優先於策略出場;滑價與手續費為估計值;SHORT
-                  僅為回測模擬(現貨實盤不支援做空);fillMode=nextOpen 時訊號於下一根開盤成交。
+                  {detail.result?.futures ? `合約研究使用${detail.result.futures.instrument === 'BYBIT_USDT_PERP' ? 'Bybit' : 'Bitget'}永續資料與成本，模型強平為目前級距壓力估算；時間分段固定參數，尚未完成選模。` : '模擬假設：停損優先；SHORT 僅為回測模擬。'}
+                  訊號於下一根開盤成交。
                   回測績效不代表未來獲利。
                 </p>
               </>

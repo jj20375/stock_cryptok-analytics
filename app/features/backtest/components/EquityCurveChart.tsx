@@ -13,6 +13,7 @@ import {
   YAxis,
 } from 'recharts';
 import type { EquityPoint } from '../types';
+import { chartDateFormatter } from '../../../utils/chartDate';
 
 interface EquityCurveChartProps {
   equityCurve: EquityPoint[];
@@ -20,7 +21,9 @@ interface EquityCurveChartProps {
 }
 
 const formatTime = (time: number) =>
-  new Date(time).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' });
+  new Date(time).toLocaleDateString('zh-TW', { month: 'long', day: 'numeric' });
+
+const tooltipDateFormat = chartDateFormatter();
 
 export function EquityCurveChart({ equityCurve, initialCapital }: EquityCurveChartProps) {
   // 計算逐點回撤 %(相對截至當下的波段高點)
@@ -56,7 +59,7 @@ export function EquityCurveChart({ equityCurve, initialCapital }: EquityCurveCha
               width={56}
             />
             <Tooltip
-              labelFormatter={(value) => new Date(Number(value)).toLocaleString('zh-TW')}
+              labelFormatter={(value) => tooltipDateFormat.format(Number(value))}
               formatter={(value: number) => [`${value}`, '權益']}
               contentStyle={{ fontSize: 11, fontFamily: 'monospace' }}
             />
@@ -85,7 +88,7 @@ export function EquityCurveChart({ equityCurve, initialCapital }: EquityCurveCha
               tickFormatter={(value) => `${value}%`}
             />
             <Tooltip
-              labelFormatter={(value) => new Date(Number(value)).toLocaleString('zh-TW')}
+              labelFormatter={(value) => tooltipDateFormat.format(Number(value))}
               formatter={(value: number) => [`${value}%`, '回撤']}
               contentStyle={{ fontSize: 11, fontFamily: 'monospace' }}
             />

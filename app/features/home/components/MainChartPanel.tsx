@@ -1,9 +1,14 @@
+/** @component 首頁行情卡片與共用圖表控制列；觀看資料與完整策略圖層由 route 提供。 */
 import { Activity, RefreshCw, Search, Star } from 'lucide-react';
-import type { RefObject } from 'react';
+import { useMemo } from 'react';
 import { cn } from '../../../utils/cn';
+import { VelaChart } from './VelaChart';
 import { StrategyLayerPanel } from './StrategyLayerPanel';
+import { MarketQuoteCards } from './MarketQuoteCards';
+import { ChartRangePanel, CHART_TIMEFRAME_LABELS } from '../../../components/ChartRangePanel';
+import { MARKET_CHART_TIMEZONES } from '../../../utils/chartDate';
 import type {
-  IndicatorVisibility,
+  MarketKey,
   PortfolioStock,
   StockDataPoint,
   StockOption,
@@ -13,6 +18,7 @@ import type {
 } from '../types';
 
 interface MainChartPanelProps {
+  market: MarketKey;
   selectedStock: StockOption;
   user: unknown;
   portfolio: PortfolioStock[];
@@ -22,20 +28,18 @@ interface MainChartPanelProps {
   priceChange: number;
   priceChangePercent: number;
   filteredData: StockDataPoint[];
+  allData: StockDataPoint[];
   loading: boolean;
   isAiAnalyzing: boolean;
   timeframe: Timeframe;
   timeRange: string;
-  showIndicators: IndicatorVisibility;
   strategyLayers: StrategyOverlayLayer[];
   allStrategyLayers: StrategyOverlayLayer[];
   enabledStrategyLayers: StrategyOverlayId[];
   activeStrategySignalCount: number;
   totalStrategySignalCount: number;
-  chartContainerRef: RefObject<HTMLDivElement>;
   onTimeframeChange: (timeframe: Timeframe) => void;
   onTimeRangeChange: (range: string) => void;
-  onToggleIndicator: (key: keyof IndicatorVisibility) => void;
   onToggleStrategyLayer: (strategyId: StrategyOverlayId) => void;
   onSetEnabledStrategyLayers: (strategyIds: StrategyOverlayId[]) => void;
   onAddToPortfolio: (stock: StockOption) => void;
@@ -43,6 +47,7 @@ interface MainChartPanelProps {
 }
 
 export function MainChartPanel({
+  market,
   selectedStock,
   user,
   portfolio,
@@ -52,156 +57,51 @@ export function MainChartPanel({
   priceChange,
   priceChangePercent,
   filteredData,
+  allData,
   loading,
   isAiAnalyzing,
   timeframe,
   timeRange,
-  showIndicators,
   strategyLayers,
   allStrategyLayers,
   enabledStrategyLayers,
   activeStrategySignalCount,
   totalStrategySignalCount,
-  chartContainerRef,
   onTimeframeChange,
   onTimeRangeChange,
-  onToggleIndicator,
   onToggleStrategyLayer,
   onSetEnabledStrategyLayers,
   onAddToPortfolio,
   onRemoveFromPortfolio,
 }: MainChartPanelProps) {
   const isInPortfolio = portfolio.some(item => item.symbol === selectedStock.symbol);
+  /** 控制列需要全部策略，圖表只接收已啟用的圖層，避免關閉後仍畫出訊號與線條。 */
+  const activeStrategyLayers = useMemo(
+    () => strategyLayers.filter(layer => enabledStrategyLayers.includes(layer.strategyId)),
+    [strategyLayers, enabledStrategyLayers]
+  );
+  /** 比照股票合約，切換範圍只定位時間軸；保留完整資料，避免短區間讓 EMA／SMA 暖機消失。 */
+  const visibleRange = useMemo(() => {
+    const first = filteredData[0], last = filteredData.at(-1);
+    if (!first || !last) return undefined;
+    const intervalMs = timeframe === '1d' ? 86_400_000 : timeframe === '4h' ? 14_400_000 : timeframe === '60m' ? 3_600_000 : 900_000;
+    return { from: first.timestamp, to: last.timestamp + intervalMs * 2 };
+  }, [filteredData, timeframe]);
 
   return (
     <div className="lg:col-span-3 flex flex-col gap-4">
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between border-b border-[#141414] pb-2 bg-white/80 p-3 md:p-4 rounded-sm gap-3">
-        <div className="flex flex-wrap items-center gap-4 md:gap-6">
-          <div className="flex flex-col">
-            <span className="text-[10px] font-mono opacity-50 uppercase">Date</span>
-            <span className="text-xs font-mono font-bold">{latestData?.date}</span>
-          </div>
-          <div className="flex flex-col">
-            <span className="text-[10px] font-mono opacity-50 uppercase">Price</span>
-            <span className={cn("text-lg md:xl font-mono font-bold", priceChange >= 0 ? "text-rose-500" : "text-emerald-500")}>
-              {currentPrice.toFixed(2)}
-            </span>
-          </div>
-          <div className="flex flex-col">
-            <span className="text-[10px] font-mono opacity-50 uppercase">Change</span>
-            <span className={cn("text-xs font-mono font-bold", priceChange >= 0 ? "text-rose-500" : "text-emerald-500")}>
-              {priceChange >= 0 ? '▲' : '▼'} {Math.abs(priceChange).toFixed(2)} ({Math.abs(priceChangePercent).toFixed(2)}%)
-            </span>
-          </div>
-          <div className="hidden md:flex flex-col">
-            <span className="text-[10px] font-mono opacity-50 uppercase">Open</span>
-            <span className="text-xs font-mono font-bold">{latestData?.open.toFixed(2)}</span>
-          </div>
-          <div className="hidden md:flex flex-col">
-            <span className="text-[10px] font-mono opacity-50 uppercase">High</span>
-            <span className="text-xs font-mono font-bold">{latestData?.high.toFixed(2)}</span>
-          </div>
-          <div className="hidden md:flex flex-col">
-            <span className="text-[10px] font-mono opacity-50 uppercase">Low</span>
-            <span className="text-xs font-mono font-bold">{latestData?.low.toFixed(2)}</span>
-          </div>
-          <div className="hidden md:flex flex-col">
-            <span className="text-[10px] font-mono opacity-50 uppercase">Volume</span>
-            <span className="text-xs font-mono font-bold">{latestData?.volume.toLocaleString()}</span>
-          </div>
-        </div>
+      <MarketQuoteCards latestData={latestData} currentPrice={currentPrice} priceChange={priceChange}
+        priceChangePercent={priceChangePercent} market={market} loading={loading} />
+      <ChartRangePanel ariaLabel="首頁 K 線觀看範圍" timeframe={timeframe} range={timeframe === '1d' ? timeRange : 'ALL'}
+        ranges={timeframe === '1d' ? [
+          { value: '1M', label: '1個月' }, { value: '3M', label: '3個月' }, { value: '6M', label: '6個月' },
+          { value: '1Y', label: '1年' }, { value: '2Y', label: '2年' }, { value: '5Y', label: '5年' }, { value: 'ALL', label: '全部' },
+        ] : [{ value: 'ALL', label: '全部' }]}
+        visibleData={filteredData} totalCount={allData.length} timezone={MARKET_CHART_TIMEZONES[market]} loading={loading}
+        onTimeframeChange={onTimeframeChange} onRangeChange={onTimeRangeChange}
+        availabilityHint="全部＝此週期已取得的資料；日線可切換觀看範圍，短週期顯示全部已載入 K 線。較長區間仍以行情來源實際提供的歷史資料為準。" />
 
-        <div className="w-full overflow-x-auto custom-scrollbar md:overflow-visible">
-          <div className="flex gap-1 items-center min-w-max md:min-w-0 pb-1 md:pb-0">
-            <div className="flex gap-1 border-r border-[#141414]/20 pr-2 mr-2 flex-shrink-0">
-              {(['15m', '60m', '4h', '1d'] as Timeframe[]).map((option) => (
-                <button
-                  key={option}
-                  onClick={() => onTimeframeChange(option)}
-                  className={cn(
-                    "px-2 py-1 text-[10px] font-mono border border-[#141414] transition-all rounded-sm flex-shrink-0",
-                    timeframe === option ? "bg-[#141414] text-[#E4E3E0]" : "hover:bg-[#141414]/5"
-                  )}
-                >
-                  {option === '1d' ? '1D' : option === '60m' ? '60M' : option === '4h' ? '4H' : option.toUpperCase()}
-                </button>
-              ))}
-            </div>
-            {timeframe === '1d' && (
-              <div className="flex gap-1 flex-shrink-0">
-                {['1M', '3M', '6M', '1Y', '2Y', '5Y'].map((range) => (
-                  <button
-                    key={range}
-                    onClick={() => onTimeRangeChange(range)}
-                    className={cn(
-                      "px-2 py-1 text-[10px] font-mono border border-[#141414] transition-all rounded-sm flex-shrink-0",
-                      timeRange === range ? "bg-[#141414] text-[#E4E3E0]" : "hover:bg-[#141414]/5"
-                    )}
-                  >
-                    {range}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      <div className="flex flex-col gap-4 p-4 bg-white/50 border border-[#141414] rounded-sm">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="flex flex-wrap gap-2 items-center">
-            <span className="text-[10px] font-mono font-bold uppercase opacity-50 mr-2">主圖指標:</span>
-            <div className="flex gap-1 bg-white p-1 border border-[#141414]/10 rounded-sm">
-              {[
-                { key: 'ma5', label: 'MA5' },
-                { key: 'ma10', label: 'MA10' },
-                { key: 'ma20', label: 'MA20' },
-                { key: 'ma60', label: 'MA60' },
-                { key: 'ma120', label: 'MA120' },
-                { key: 'ema', label: 'EMA' },
-              ].map((indicator) => (
-                <button
-                  key={indicator.key}
-                  onClick={() => onToggleIndicator(indicator.key as keyof IndicatorVisibility)}
-                  className={cn(
-                    "px-2 py-1 text-[10px] font-mono border transition-all rounded-sm",
-                    showIndicators[indicator.key as keyof IndicatorVisibility]
-                      ? "bg-[#141414] text-[#E4E3E0] border-[#141414]"
-                      : "bg-transparent text-[#141414] border-transparent hover:border-[#141414]/20"
-                  )}
-                >
-                  {indicator.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="flex flex-wrap gap-2 items-center">
-            <span className="text-[10px] font-mono font-bold uppercase opacity-50 mr-2">副圖指標:</span>
-            <div className="flex gap-1 bg-white p-1 border border-[#141414]/10 rounded-sm">
-              {[
-                { key: 'volume', label: '成交量' },
-                { key: 'macd', label: 'MACD' },
-                { key: 'rsi', label: 'RSI' },
-                { key: 'kd', label: 'KDJ' },
-              ].map((indicator) => (
-                <button
-                  key={indicator.key}
-                  onClick={() => onToggleIndicator(indicator.key as keyof IndicatorVisibility)}
-                  className={cn(
-                    "px-2 py-1 text-[10px] font-mono border transition-all rounded-sm",
-                    showIndicators[indicator.key as keyof IndicatorVisibility]
-                      ? "bg-[#141414] text-[#E4E3E0] border-[#141414]"
-                      : "bg-transparent text-[#141414] border-transparent hover:border-[#141414]/20"
-                  )}
-                >
-                  {indicator.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-
+      <div className="p-3 md:p-4 bg-white/50 border border-[#141414] rounded-sm">
         <StrategyLayerPanel
           strategyLayers={strategyLayers}
           allStrategyLayers={allStrategyLayers}
@@ -213,7 +113,7 @@ export function MainChartPanel({
         />
       </div>
 
-      {/* 圖表容器提高總高度，並在 home.tsx 將多出的空間優先分給主 K 線窗格。 */}
+      {/* Vela 主圖保留足夠高度，讓工作區按容器尺寸分配價格圖與副圖。 */}
       <section className="border border-[#141414] p-3 md:p-4 bg-white min-h-[980px] md:min-h-[820px] h-[94vh] md:h-[92vh] max-h-[1500px] rounded-sm relative flex flex-col overflow-hidden">
         {isAiAnalyzing && (
           <div className="absolute inset-0 z-50 bg-[#141414]/80 backdrop-blur-sm flex flex-col items-center justify-center text-white p-8 text-center">
@@ -262,11 +162,11 @@ export function MainChartPanel({
                 </button>
               )}
             </div>
-            <span className="text-[10px] font-mono opacity-50">Data points: {filteredData.length} | Timeframe: {timeframe}</span>
+            <span className="text-[10px] font-mono opacity-50">顯示 {filteredData.length} 根 · {CHART_TIMEFRAME_LABELS[timeframe]}</span>
           </div>
         </div>
 
-        <div className="flex-1 w-full relative">
+        <div className="flex-1 min-h-0 w-full relative">
           {filteredData.length === 0 && !loading && !isAiAnalyzing && (
             <div className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-white/80 backdrop-blur-sm">
               <Search className="w-12 h-12 text-[#141414]/20 mb-4" />
@@ -277,7 +177,16 @@ export function MainChartPanel({
               </p>
             </div>
           )}
-          <div className="w-full h-full" ref={chartContainerRef} />
+          <VelaChart
+            market={market}
+            symbol={selectedStock.symbol}
+            timeframe={timeframe}
+            data={allData}
+            visibleRange={visibleRange}
+            strategyLayers={activeStrategyLayers}
+            allStrategyLayers={allStrategyLayers}
+            enabledStrategyLayerIds={enabledStrategyLayers}
+          />
         </div>
       </section>
     </div>

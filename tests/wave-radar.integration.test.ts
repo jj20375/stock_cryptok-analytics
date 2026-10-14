@@ -53,7 +53,7 @@ test('D1 排程：逐幣隔離、HYPE 現貨來源、失敗補送、階段去重
       }
       return originalFetch(input, init);
     };
-    const env: WaveEnv = { DB: binding as unknown as WaveEnv['DB'], WAVE_RADAR_ENABLED: 'true', SLACK_API_TOKEN: 'test-token', CRYPTO_ENTRY_SLACK_CHANNEL_ID: 'test-channel' };
+    const env: WaveEnv = { DB: binding as unknown as WaveEnv['DB'], WAVE_RADAR_ENABLED: 'true', SLACK_API_TOKEN: 'test-token', CRYPTO_SIGNAL_NOTIFICATIONS_ENABLED: 'true', CRYPTO_ENTRY_SLACK_CHANNEL_ID: 'test-channel' };
     await runWaveRadar({ ...env, WAVE_RADAR_ENABLED: 'false' });
     assert.equal(marketRequests, 0);
     // 幣數超過單輪上限時需要多輪才會掃完(受 Cloudflare subrequest 額度限制)，

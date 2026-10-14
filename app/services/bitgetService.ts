@@ -114,7 +114,7 @@ const bitgetSignedRequest = async (
 };
 
 /** 保留錯誤碼與端點供安全的帳戶版本判斷；不保存或輸出任何憑證與簽章。 */
-class BitgetApiError extends Error {
+export class BitgetApiError extends Error {
   constructor(
     readonly code: string,
     readonly requestPath: string,
@@ -134,7 +134,8 @@ const bitgetSignedPost = (
   options: { demo?: boolean } = {},
 ) => bitgetSignedRequest('POST', requestPath, bodyObj, apiKey, apiSecret, passphrase, options);
 
-const bitgetSignedGet = (
+/** 帳本沿用同一簽章與 Demo header；呼叫端固定官方唯讀端點，不接受使用者提供的 URL。 */
+export const bitgetSignedGet = (
   requestPath: string,
   apiKey: string,
   apiSecret: string,
@@ -239,11 +240,11 @@ export async function fetchBitgetFuturesAccount(
   passphrase: string,
 ): Promise<BitgetFuturesAccount> {
   /**
-   * Bitget 同時存在 UTA V3 與 Classic V2 Demo 帳戶。先探測 V3；只有收到明確的
-   * 40099 環境不符才回退 V2，其他驗證錯誤直接中止，避免掩蓋簽章或權限問題。
-   * 兩次請求都固定帶 paptrading:1，絕不因回退而送往正式交易環境。
+   * Bitget 同時存在 UTA V3 與 Classic V2 帳戶。先探測 V3；只有收到明確的
+   * 40084 Classic 帳戶回應或舊 40099 相容回應才查 V2；簽章／權限錯誤直接中止。
+   * 兩次請求均保留原環境；Demo 固定 paptrading:1，LIVE 不會使用模擬憑證。
    */
-  if (environment === 'DEMO') {
+  {
     try {
       const data = await bitgetSignedGet(
         '/api/v3/account/settings', apiKey, apiSecret, passphrase, futuresRequestOptions(environment),
@@ -252,7 +253,7 @@ export async function fetchBitgetFuturesAccount(
         symbolConfigList?: Array<{ category?: string; symbol?: string; marginMode?: string }>;
       };
       if (data?.holdMode !== 'one_way_mode' && data?.holdMode !== 'hedge_mode') {
-        throw new Error('[Bitget] DEMO UTA 帳戶未回傳有效持倉模式');
+        throw new Error(`[Bitget] ${environment} UTA 帳戶未回傳有效持倉模式`);
       }
       const symbolConfig = data.symbolConfigList?.find(config =>
         config.category === BITGET_USDT_FUTURES_CATEGORY && config.symbol === symbol,
@@ -263,7 +264,7 @@ export async function fetchBitgetFuturesAccount(
         apiDialect: 'UTA_V3',
       };
     } catch (error) {
-      if (!(error instanceof BitgetApiError) || error.code !== '40099') throw error;
+      if (!(error instanceof BitgetApiError) || !['40084', '40099'].includes(error.code)) throw error;
     }
   }
   const path = `/api/v2/mix/account/account?symbol=${encodeURIComponent(symbol)}&productType=USDT-FUTURES&marginCoin=USDT`;
@@ -286,8 +287,8 @@ export async function fetchBitgetFuturesAccount(
 }
 
 /**
- * 每次進場固定逐倉，槓桿由上層傳入已驗證的實際值。若帳戶目前不是逐倉，
- * 只有在沒有未平倉部位／委託時 Bitget 才允許切換；切換失敗就拒絕本次進場，不以全倉模式降級送單。
+ * 自動化可明確指定全倉，舊呼叫維持逐倉。模式與槓桿設定有交易所副作用，
+ * 僅在完整新倉授權與持倉檢查後呼叫；模式切換失敗就拒單。
  */
 export async function configureBitgetFuturesLong(
   environment: BitgetFuturesEnvironment,
@@ -297,19 +298,23 @@ export async function configureBitgetFuturesLong(
   apiKey: string,
   apiSecret: string,
   passphrase: string,
+  positionSide: 'long' | 'short' = 'long',
+  marginMode: 'isolated' | 'crossed' = 'isolated',
 ): Promise<void> {
   if (account.apiDialect === 'UTA_V3') {
     /**
-     * UTA 以同一個請求設定逐倉與槓桿；雙向模式只寫 longLeverage，
-     * 不能連帶改動使用者可能自行保留的空單槓桿。
+     * UTA 以同一個請求設定逐倉與槓桿；雙向模式只寫指定方向的槓桿，
+     * 只修改指定方向，不能連帶改動另一方向的槓桿。
      */
-    const leverageBody = account.positionMode === 'hedge_mode'
+    const leverageBody = marginMode === 'crossed'
+      ? { category: BITGET_USDT_FUTURES_CATEGORY, symbol, marginMode, leverage: leverage.toString() }
+      : account.positionMode === 'hedge_mode'
       ? {
-          category: BITGET_USDT_FUTURES_CATEGORY, symbol, marginMode: 'isolated', posSide: 'long',
-          longLeverage: leverage.toString(),
+          category: BITGET_USDT_FUTURES_CATEGORY, symbol, marginMode: 'isolated', posSide: positionSide,
+          [positionSide === 'long' ? 'longLeverage' : 'shortLeverage']: leverage.toString(),
         }
       : {
-          category: BITGET_USDT_FUTURES_CATEGORY, symbol, marginMode: 'isolated', posSide: 'long',
+          category: BITGET_USDT_FUTURES_CATEGORY, symbol, marginMode: 'isolated', posSide: positionSide,
           leverage: leverage.toString(),
         };
     await bitgetSignedPost(
@@ -318,15 +323,16 @@ export async function configureBitgetFuturesLong(
     );
     return;
   }
-  if (account.marginMode !== 'isolated') {
+  if (account.marginMode !== marginMode) {
     await bitgetSignedPost(
       '/api/v2/mix/account/set-margin-mode',
-      { symbol, productType: 'USDT-FUTURES', marginCoin: 'USDT', marginMode: 'isolated' },
+      { symbol, productType: 'USDT-FUTURES', marginCoin: 'USDT', marginMode },
       apiKey, apiSecret, passphrase, futuresRequestOptions(environment),
     );
   }
-  const leverageBody = account.positionMode === 'hedge_mode'
-    ? { symbol, productType: 'USDT-FUTURES', marginCoin: 'USDT', longLeverage: leverage.toString(), holdSide: 'long' }
+  /** 全倉兩個方向共用 leverage；longLeverage／shortLeverage 僅供逐倉雙向設定。 */
+  const leverageBody = marginMode === 'isolated' && account.positionMode === 'hedge_mode'
+    ? { symbol, productType: 'USDT-FUTURES', marginCoin: 'USDT', [positionSide === 'long' ? 'longLeverage' : 'shortLeverage']: leverage.toString(), holdSide: positionSide }
     : { symbol, productType: 'USDT-FUTURES', marginCoin: 'USDT', leverage: leverage.toString() };
   await bitgetSignedPost(
     '/api/v2/mix/account/set-leverage', leverageBody,
@@ -334,7 +340,7 @@ export async function configureBitgetFuturesLong(
   );
 }
 
-/** USDT 永續只開多：side=buy、tradeSide=open，並由交易所保存原生停損。 */
+/** USDT 永續以指定多空方向開倉；預設多單維持舊呼叫相容，交易所保存原生停損。 */
 export async function placeBitgetFuturesLong(params: {
   environment: BitgetFuturesEnvironment;
   symbol: string;
@@ -348,6 +354,9 @@ export async function placeBitgetFuturesLong(params: {
   apiKey: string;
   apiSecret: string;
   passphrase: string;
+  positionSide?: 'long' | 'short';
+  takeProfitPrice?: number;
+  marginMode?: 'isolated' | 'crossed';
 }): Promise<BitgetOrderReceipt> {
   if (params.apiDialect === 'UTA_V3') {
     /**
@@ -359,19 +368,20 @@ export async function placeBitgetFuturesLong(params: {
       {
         category: BITGET_USDT_FUTURES_CATEGORY,
         symbol: params.symbol,
+        marginMode: params.marginMode ?? 'isolated',
         qty: params.quantity.toFixed(params.quantityPrecision),
-        side: 'buy',
-        ...(params.positionMode === 'hedge_mode' ? { posSide: 'long' } : {}),
+        side: params.positionSide === 'short' ? 'sell' : 'buy',
+        ...(params.positionMode === 'hedge_mode' ? { posSide: params.positionSide ?? 'long' } : { reduceOnly: 'no' }),
         orderType: 'market',
         clientOid: params.clientOid,
-        reduceOnly: 'no',
         stopLoss: params.stopLossPrice.toFixed(params.pricePrecision),
         slTriggerBy: 'mark',
         slOrderType: 'market',
+        ...(params.takeProfitPrice != null ? { takeProfit: params.takeProfitPrice.toFixed(params.pricePrecision), tpTriggerBy: 'mark', tpOrderType: 'market' } : {}),
       },
       params.apiKey, params.apiSecret, params.passphrase, futuresRequestOptions(params.environment),
     ) as { orderId?: string; clientOid?: string };
-    if (!data?.orderId) throw new Error('[Bitget] DEMO UTA 合約開多成功回應缺少 orderId');
+    if (!data?.orderId) throw new Error(`[Bitget] ${params.environment} UTA 合約開倉成功回應缺少 orderId`);
     return { orderId: data.orderId, clientOid: data.clientOid || params.clientOid };
   }
   const data = await bitgetSignedPost(
@@ -379,14 +389,15 @@ export async function placeBitgetFuturesLong(params: {
     {
       symbol: params.symbol,
       productType: 'USDT-FUTURES',
-      marginMode: 'isolated',
+      marginMode: params.marginMode ?? 'isolated',
       marginCoin: 'USDT',
       size: params.quantity.toFixed(params.quantityPrecision),
-      side: 'buy',
+      side: params.positionSide === 'short' ? 'sell' : 'buy',
       tradeSide: 'open',
       orderType: 'market',
       clientOid: params.clientOid,
       presetStopLossPrice: params.stopLossPrice.toFixed(params.pricePrecision),
+      ...(params.takeProfitPrice != null ? { presetStopSurplusPrice: params.takeProfitPrice.toFixed(params.pricePrecision) } : {}),
     },
     params.apiKey, params.apiSecret, params.passphrase, futuresRequestOptions(params.environment),
   ) as { orderId?: string; clientOid?: string };
@@ -395,8 +406,8 @@ export async function placeBitgetFuturesLong(params: {
 }
 
 /**
- * 平倉使用 Flash Close 並鎖定 holdSide=long。這個端點會關閉既有多單，
- * 不會像一般 sell 市價單在持倉不足時反向建立空單。
+ * Classic 平倉使用 Flash Close 並鎖定指定 holdSide；預設 long 維持舊呼叫相容，
+ * 不會像一般市價單在持倉不足時反向建立另一方向部位。
  */
 export async function closeBitgetFuturesLong(
   environment: BitgetFuturesEnvironment,
@@ -405,8 +416,10 @@ export async function closeBitgetFuturesLong(
   apiKey: string,
   apiSecret: string,
   passphrase: string,
+  clientOid?: string,
+  positionSide: 'long' | 'short' = 'long',
 ): Promise<BitgetOrderReceipt> {
-  if (environment === 'DEMO') {
+  {
     const account = await fetchBitgetFuturesAccount(environment, symbol, apiKey, apiSecret, passphrase);
     /**
      * UTA 雙向模式以 sell + long 明確平多；單向模式再加 reduceOnly=yes，
@@ -419,20 +432,21 @@ export async function closeBitgetFuturesLong(
           category: BITGET_USDT_FUTURES_CATEGORY,
           symbol,
           qty: quantity,
-          side: 'sell',
-          ...(account.positionMode === 'hedge_mode' ? { posSide: 'long' } : { reduceOnly: 'yes' }),
+          side: positionSide === 'long' ? 'sell' : 'buy',
+          ...(account.positionMode === 'hedge_mode' ? { posSide: positionSide } : { reduceOnly: 'yes' }),
           orderType: 'market',
-          clientOid: `close-${Date.now()}`,
+          /** 上層有穩定事件 ID 時沿用，逾時後可用同一 clientOid 唯讀找回結果。 */
+          clientOid: clientOid || `close-${Date.now()}`,
         },
         apiKey, apiSecret, passphrase, futuresRequestOptions(environment),
       ) as { orderId?: string; clientOid?: string };
-      if (!data?.orderId) throw new Error('[Bitget] DEMO UTA 平多成功回應缺少 orderId');
+      if (!data?.orderId) throw new Error(`[Bitget] ${environment} UTA 平倉成功回應缺少 orderId`);
       return { orderId: data.orderId, clientOid: data.clientOid || '' };
     }
   }
   const data = await bitgetSignedPost(
     '/api/v2/mix/order/close-positions',
-    { symbol, holdSide: 'long', productType: 'USDT-FUTURES' },
+    { symbol, holdSide: positionSide, productType: 'USDT-FUTURES' },
     apiKey, apiSecret, passphrase, futuresRequestOptions(environment),
   ) as {
     successList?: Array<{ orderId?: string; clientOid?: string }>;

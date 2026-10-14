@@ -1,4 +1,4 @@
-import { redirect, useLoaderData } from "react-router";
+import { Link, redirect, useLoaderData } from "react-router";
 import type { LoaderFunctionArgs } from "react-router";
 import { drizzle } from "drizzle-orm/d1";
 import { eq, desc } from "drizzle-orm";
@@ -67,6 +67,7 @@ export default function DashboardRoute() {
           <header className="border-b border-[#141414] pb-4">
             <h1 className="text-2xl md:text-3xl font-serif italic tracking-tight text-[#141414]">交易績效 Dashboard</h1>
             <p className="text-gray-600 mt-2">即時追蹤您的自動化交易成效與歷史紀錄。</p>
+            <Link to="/trade-journal" className="mt-3 inline-block text-sm text-blue-700 underline">Bitget 實際成交、淨績效與倉位復盤 →</Link>
           </header>
 
           {/* 【詳細繁體中文註解】：全球總經債券參考風向球 UI 元件 */}

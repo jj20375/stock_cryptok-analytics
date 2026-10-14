@@ -1,3 +1,4 @@
+import { cryptoSignalSlackChannel, type CryptoSignalNotificationEnv } from '../cryptoSignalNotifications';
 /** @file 波段掃描及使用者授權的 Slack 通知；額外分析與原快照共用行情。 */
 import { drizzle } from 'drizzle-orm/d1';
 import { and, desc, eq, gte, isNull, lt } from 'drizzle-orm';
@@ -11,7 +12,7 @@ import { WAVE_ANALYSIS_VERSION } from './analysis';
 import { slackPostFromStored } from '../slack/cryptoSignalCard';
 
 /** 排程總開關與 Slack 設定僅由 Worker 環境提供；不讀取或操作交易金鑰。 */
-export interface WaveEnv {
+export interface WaveEnv extends CryptoSignalNotificationEnv {
   DB: Parameters<typeof drizzle>[0];
   WAVE_RADAR_ENABLED?: string;
   SLACK_API_TOKEN?: string;
@@ -37,7 +38,7 @@ const SCAN_BUDGET_MS = 20_000;
 const MAX_SYMBOLS_PER_SCAN = 12;
 const SCAN_CONCURRENCY = 6;
 const MAX_NOTIFICATIONS_PER_RUN = 3;
-export const waveCryptoSlackChannel = (env: WaveEnv) => env.CRYPTO_ENTRY_SLACK_CHANNEL_ID?.trim() || null;
+export const waveCryptoSlackChannel = (env: WaveEnv) => cryptoSignalSlackChannel(env);
 
 /**
  * 逐幣掃描，外部行情逾時後逐幣隔離，避免單幣故障拖垮全表。
