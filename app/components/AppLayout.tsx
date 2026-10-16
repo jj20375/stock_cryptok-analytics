@@ -12,7 +12,8 @@ import {
   FlaskConical,
   Shield,
   Radar,
-  Satellite
+  Satellite,
+  Newspaper
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -30,7 +31,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
 
   const navLinkClass = (path: string) => twMerge(
     clsx(
-      "trading-nav-link p-2 transition-colors rounded-sm flex items-center justify-center",
+      "trading-nav-link shrink-0 p-2 transition-colors rounded-sm flex items-center justify-center",
       isActive(path) && "trading-nav-link-active",
     )
   );
@@ -42,7 +43,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
         <Link to="/" className="trading-logo w-10 h-10 rounded-sm flex items-center justify-center">
           <Activity size={24} />
         </Link>
-        <nav className="flex flex-col gap-6 w-full px-2">
+        <nav className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto w-full px-2">
           <Link to="/dashboard" className={navLinkClass("/dashboard")} title="交易績效 Dashboard">
             <LayoutGrid size={20} />
           </Link>
@@ -52,6 +53,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
           <Link to="/stock-analysis" className={navLinkClass("/stock-analysis")} title="個股深度分析">
             <TrendingUp size={20} />
           </Link>
+          <Link to="/stock-themes" className={navLinkClass('/stock-themes')} title="題材與財報" aria-label="題材與財報"><Newspaper size={20} /></Link>
           <Link to="/" className={navLinkClass("/")}>
             <Activity size={20} />
           </Link>
@@ -109,7 +111,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
       </aside>
 
       {/* Mobile Bottom Navigation */}
-      <nav className="trading-mobile-nav fixed bottom-0 left-0 w-full h-16 flex md:hidden items-center justify-around px-4 z-30">
+      <nav className="trading-mobile-nav fixed bottom-0 left-0 w-full h-16 flex md:hidden items-center justify-start gap-3 overflow-x-auto px-4 z-30">
         <Link to="/crypto-futures" className={navLinkClass('/crypto-futures')} title="合約專用策略" aria-label="合約專用策略"><Shield size={20} /></Link>
         <Link to="/" className={navLinkClass("/")}>
           <Activity size={20} />
@@ -117,6 +119,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
         <Link to="/stock-analysis" className={navLinkClass("/stock-analysis")}>
           <TrendingUp size={20} />
         </Link>
+        <Link to="/stock-themes" className={navLinkClass('/stock-themes')} title="題材與財報" aria-label="題材與財報"><Newspaper size={20} /></Link>
         <Link to="/dashboard" className={navLinkClass("/dashboard")}>
           <LayoutGrid size={20} />
         </Link>

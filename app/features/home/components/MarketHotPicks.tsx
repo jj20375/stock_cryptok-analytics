@@ -1,3 +1,4 @@
+/** @component 掃描結果卡；點選後同步切換 K 線及基本面消息參考區。 */
 import { Activity, BrainCircuit, FlaskConical, Search, TrendingDown, TrendingUp, Zap } from 'lucide-react';
 import type { RefObject } from 'react';
 import { Link } from 'react-router';
@@ -303,6 +304,7 @@ export function MarketHotPicks({
               </div>
 
               <div className="mt-auto">
+                {market !== 'CRYPTO' && <p className="mb-2 text-[11px] opacity-80">點選查看 K 線・基本面與消息 →</p>}
                 <div className="flex items-center justify-between mb-1">
                   <div className="text-[9px] font-mono opacity-50 uppercase tracking-tighter">Strength Score</div>
                   <div className="text-xs font-mono font-bold">{res.score}</div>

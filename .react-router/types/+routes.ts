@@ -23,6 +23,9 @@ type Pages = {
   "/stock-analysis": {
     params: {};
   };
+  "/stock-themes": {
+    params: {};
+  };
   "/api/top50": {
     params: {};
   };
@@ -53,6 +56,9 @@ type Pages = {
     params: {};
   };
   "/api/analyze-stock": {
+    params: {};
+  };
+  "/api/stock-brief": {
     params: {};
   };
   "/api/run-report": {
@@ -131,7 +137,7 @@ type Pages = {
 type RouteFiles = {
   "root.tsx": {
     id: "root";
-    page: "/" | "/dashboard" | "/trade-journal" | "/stock-analysis" | "/api/top50" | "/api/stock/*" | "/api/gemini" | "/api/logout" | "/api/test-telegram" | "/api/test-slack" | "/api/test-strategy" | "/api/test-crypto" | "/api/portfolio" | "/api/analyze-stock" | "/api/run-report" | "/api/backtest" | "/backtest" | "/crypto-futures" | "/api/crypto-futures" | "/api/futures-automation" | "/bitget-stock-perps" | "/api/warroom" | "/api/freqtrade/sync" | "/api/freqtrade/research" | "/api/potential-radar/chart" | "/api/webhook/tradingview/:secret" | "/warroom" | "/wave-radar" | "/potential-radar" | "/us-stock-radar" | "/tw-stock-radar" | "/tw-daytrade" | "/tradingview-signals" | "/login" | "/register" | "/portfolio" | "/settings";
+    page: "/" | "/dashboard" | "/trade-journal" | "/stock-analysis" | "/stock-themes" | "/api/top50" | "/api/stock/*" | "/api/gemini" | "/api/logout" | "/api/test-telegram" | "/api/test-slack" | "/api/test-strategy" | "/api/test-crypto" | "/api/portfolio" | "/api/analyze-stock" | "/api/stock-brief" | "/api/run-report" | "/api/backtest" | "/backtest" | "/crypto-futures" | "/api/crypto-futures" | "/api/futures-automation" | "/bitget-stock-perps" | "/api/warroom" | "/api/freqtrade/sync" | "/api/freqtrade/research" | "/api/potential-radar/chart" | "/api/webhook/tradingview/:secret" | "/warroom" | "/wave-radar" | "/potential-radar" | "/us-stock-radar" | "/tw-stock-radar" | "/tw-daytrade" | "/tradingview-signals" | "/login" | "/register" | "/portfolio" | "/settings";
   };
   "routes/home.tsx": {
     id: "routes/home";
@@ -148,6 +154,10 @@ type RouteFiles = {
   "routes/stock-analysis.tsx": {
     id: "routes/stock-analysis";
     page: "/stock-analysis";
+  };
+  "routes/stock-themes.tsx": {
+    id: "routes/stock-themes";
+    page: "/stock-themes";
   };
   "routes/api.top50.ts": {
     id: "routes/api.top50";
@@ -188,6 +198,10 @@ type RouteFiles = {
   "routes/api.analyze-stock.ts": {
     id: "routes/api.analyze-stock";
     page: "/api/analyze-stock";
+  };
+  "routes/api.stock-brief.ts": {
+    id: "routes/api.stock-brief";
+    page: "/api/stock-brief";
   };
   "routes/api.run-report.ts": {
     id: "routes/api.run-report";
@@ -289,6 +303,7 @@ type RouteModules = {
   "routes/dashboard": typeof import("./app/routes/dashboard.tsx");
   "routes/trade-journal": typeof import("./app/routes/trade-journal.tsx");
   "routes/stock-analysis": typeof import("./app/routes/stock-analysis.tsx");
+  "routes/stock-themes": typeof import("./app/routes/stock-themes.tsx");
   "routes/api.top50": typeof import("./app/routes/api.top50.ts");
   "routes/api.stock": typeof import("./app/routes/api.stock.ts");
   "routes/api.gemini": typeof import("./app/routes/api.gemini.ts");
@@ -299,6 +314,7 @@ type RouteModules = {
   "routes/api.test-crypto": typeof import("./app/routes/api.test-crypto.ts");
   "routes/api.portfolio": typeof import("./app/routes/api.portfolio.ts");
   "routes/api.analyze-stock": typeof import("./app/routes/api.analyze-stock.ts");
+  "routes/api.stock-brief": typeof import("./app/routes/api.stock-brief.ts");
   "routes/api.run-report": typeof import("./app/routes/api.run-report.ts");
   "routes/api.backtest": typeof import("./app/routes/api.backtest.ts");
   "routes/backtest": typeof import("./app/routes/backtest.tsx");

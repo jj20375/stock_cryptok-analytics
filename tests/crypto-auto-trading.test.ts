@@ -50,9 +50,10 @@ test('Bitget Demo UTA 永續進場固定開多、原生停損且帶 paptrading:1
     });
     assert.equal(receipt.orderId, 'demo-order');
     assert.equal(captured?.headers.get('paptrading'), '1');
+    /** 雙向持倉只送 posSide，不送 reduceOnly（單向模式才帶 reduceOnly=no）；未指定保證金模式時預設逐倉。 */
     assert.deepEqual(captured?.body, {
-      category: 'USDT-FUTURES', symbol: 'NEARUSDT', qty: '2.345', side: 'buy', posSide: 'long',
-      orderType: 'market', clientOid: 'client-1', reduceOnly: 'no', stopLoss: '4.1000',
+      category: 'USDT-FUTURES', symbol: 'NEARUSDT', marginMode: 'isolated', qty: '2.345', side: 'buy', posSide: 'long',
+      orderType: 'market', clientOid: 'client-1', stopLoss: '4.1000',
       slTriggerBy: 'mark', slOrderType: 'market',
     });
   } finally {

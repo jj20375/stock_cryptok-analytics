@@ -21,6 +21,7 @@ import { HomeHeader } from '../features/home/components/HomeHeader';
 import { LeftSidebar } from '../features/home/components/LeftSidebar';
 import { MainChartPanel } from '../features/home/components/MainChartPanel';
 import { MarketHotPicks } from '../features/home/components/MarketHotPicks';
+import { StockBriefPanel } from '../features/home/components/StockBriefPanel';
 import { STOCKS } from '../features/home/constants/markets';
 import { useStrategyLayers } from '../features/home/use-strategy-layers';
 import type {
@@ -543,6 +544,8 @@ export default function App() {
             onScanStrategyChange={setScanStrategy}
             onScanTimeframeChange={setScanTimeframe}
           />
+          {market !== 'CRYPTO' && <div key={`brief:${market}:${selectedStock.symbol}`}><StockBriefPanel market={market}
+            symbol={selectedStock.symbol} name={selectedStock.name} loggedIn={Boolean(user)} /></div>}
           <MainChartPanel
             market={market}
             selectedStock={selectedStock}

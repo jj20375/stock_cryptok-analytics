@@ -15,11 +15,12 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   }
 
   const url = new URL(request.url);
-  let symbol = url.searchParams.get("symbol") || "";
+  const symbol = (url.searchParams.get("symbol") || "").trim().toUpperCase();
   const market = url.searchParams.get("market") || "TW";
 
-  if (!symbol) {
-    return Response.json({ error: "Missing symbol" }, { status: 400 });
+  // 固定格式避免任意文字進入外部行情路徑與 AI；上市櫃尾碼只適用台股。
+  if (!['TW', 'US'].includes(market) || !(market === 'TW' ? /^\d{4,6}(?:\.TW|\.TWO)?$/ : /^[A-Z][A-Z0-9.-]{0,14}$/).test(symbol)) {
+    return Response.json({ error: "請輸入有效的股票代號與市場。" }, { status: 400 });
   }
 
   // 統一處理代號正規化 (針對台股)
