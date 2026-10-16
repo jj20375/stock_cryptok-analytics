@@ -44,7 +44,8 @@ async function requestSource(key: SourceKey): Promise<SourceResponse> {
   let result: SourceResponse;
   try {
     const response = await fetch(definition.url, {
-      redirect: 'error', signal: controller.signal,
+      /** Workers 不支援 redirect: 'error'；'manual' 搭配下方 !response.ok 檢查，3xx 同樣視為失敗。 */
+      redirect: 'manual', signal: controller.signal,
       headers: { Accept: key === 'programs' ? 'text/html' : 'application/json' },
     });
     if (!response.ok) throw new Error('公開來源暫時無法讀取');

@@ -4,6 +4,7 @@ import test from 'node:test';
 import { normalizeBriefSymbol, isTaiwanFund } from '../app/services/stockBrief/types';
 import { parseStockNews, parseAnnouncements, parseTaiwanValuation, safeNewsUrl } from '../app/services/stockBrief/normalize';
 import { fetchBriefSource } from '../app/services/stockBrief/source.server';
+import { fetchPublicSource } from '../app/services/stockResearch/sources.server';
 import { loader } from '../app/routes/api.stock-brief';
 import { getSession, commitSession } from '../app/utils/auth';
 
@@ -73,4 +74,22 @@ test('外部請求合併、失敗可降級；認證及參數失敗不得讀取�
     assert.equal((await loader(args('symbol=../../&market=TW', cookie) as never)).status, 400);
     assert.equal(calls, 1);
   } finally { globalThis.fetch = originalFetch; }
+});
+
+test('對外請求不得使用 Workers 不支援的 redirect:error；重新導向一律視為來源無法讀取', async () => {
+  const original = globalThis.fetch, seen: unknown[] = [];
+  try {
+    globalThis.fetch = async (_input, init) => {
+      seen.push(init?.redirect);
+      /** Cloudflare Workers 對 redirect:'error' 會在送出前丟 TypeError；本機 Node 不會，所以必須在測試中模擬。 */
+      if (init?.redirect !== 'manual' && init?.redirect !== 'follow') throw new TypeError('Invalid redirect value');
+      return new Response(null, { status: 302, headers: { Location: 'https://example.com/login' } });
+    };
+    const brief = await fetchBriefSource('測試重新導向', 'https://example.test/brief-redirect');
+    const research = await fetchPublicSource('twRevenue');
+    assert.deepEqual(seen, ['manual', 'manual']);
+    assert.equal(brief.source.status, 'unavailable');
+    assert.equal(research.source.status, 'unavailable');
+    assert.equal(brief.text, ''); assert.equal(research.text, '');
+  } finally { globalThis.fetch = original; }
 });

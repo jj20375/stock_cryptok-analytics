@@ -13,7 +13,11 @@ async function readSource(label: string, url: string): Promise<BriefSource> {
   /** 10 秒限制涵蓋下載本文，單一來源失敗會回傳缺資料而不拖住整個分析頁。 */
   const timeout = setTimeout(() => controller.abort(), 10_000);
   try {
-    const response = await fetch(url, { redirect: 'error', signal: controller.signal, headers: { 'User-Agent': 'Mozilla/5.0' } });
+    /**
+     * Cloudflare Workers 不支援 redirect: 'error'（會在送出請求前就丟 TypeError，導致正式環境全部來源失敗）；
+     * 改用 'manual'，3xx 不是 ok，下一行會一併視為來源無法讀取，仍不跟隨重新導向。
+     */
+    const response = await fetch(url, { redirect: 'manual', signal: controller.signal, headers: { 'User-Agent': 'Mozilla/5.0' } });
     if (!response.ok || !response.body) throw new Error('來源無法讀取');
     const reader = response.body.getReader(), decoder = new TextDecoder();
     let size = 0, text = '';
