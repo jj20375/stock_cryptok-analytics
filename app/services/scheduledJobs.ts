@@ -9,6 +9,16 @@ export const SCHEDULES = {
   usDaily: '30,45 20,21 * * 1-5',
 } as const;
 
+/**
+ * 台股開盤前羅盤快照時間：台北週一至週五 08:30（UTC 00:30，台灣無夏令時間）。
+ * Cron Trigger 名額已用滿，因此掛在每分鐘的 protection 排程上，以排程時間判斷是否執行。
+ */
+export function isTwPreopenSnapshotTime(scheduledAt: number) {
+  const at = new Date(scheduledAt);
+  const weekday = at.getUTCDay();
+  return weekday >= 1 && weekday <= 5 && at.getUTCHours() === 0 && at.getUTCMinutes() === 30;
+}
+
 /** 美股日報只在紐約 16:30／16:45 執行，另一個 UTC 時段直接略過，避免換季時重送或提早報告。 */
 export function isUsDailyReportTime(scheduledAt: number) {
   const parts = new Intl.DateTimeFormat('en-US', {

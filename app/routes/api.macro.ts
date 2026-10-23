@@ -1,32 +1,60 @@
 import { type LoaderFunctionArgs } from "react-router";
-import { getUserId } from "../utils/auth";
-import { getMacroIndicators } from "../services/macroService";
+import { getMacroIndicators, type MacroIndicators } from "../services/macroService";
+import { recordMacroSnapshot } from "../services/macro/snapshotStore.server";
 
 /**
  * 【詳細繁體中文註解】
- * 全球總體經濟與美債參考指標 API 端點
- * 用途：前端 Dashboard 定期發送請求，取得最新的美債殖利率、美元指數、VIX 及宏觀風控狀態
+ * 全球總體經濟（美債、匯率、期貨、債券利差）多空風向球 API 端點
+ * 用途：提供首頁與 Dashboard 即時讀取最新宏觀多空走向與四大維度判讀
+ * 內建 3 分鐘記憶體快取，避免頻繁觸發 Yahoo Finance 限流，並支援 ?refresh=1 強制更新
+ * 副作用：每次重新計算時，於背景寫入一筆 API_VIEW 預測快照到 D1（15 分鐘節流，失敗不影響回應）
  */
+let cachedMacro: { data: MacroIndicators; expiresAt: number } | null = null;
+const MACRO_CACHE_TTL_MS = 3 * 60 * 1000;
+
 export async function loader({ request, context }: LoaderFunctionArgs) {
   try {
-    const env = (context.cloudflare as any)?.env || process.env;
+    const url = new URL(request.url);
+    const forceRefresh = url.searchParams.get("refresh") === "1";
+    const now = Date.now();
 
-    // 【安全性檢查】：驗證使用者是否已登入
-    const userId = await getUserId(request, env);
-    if (!userId) {
-      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    if (!forceRefresh && cachedMacro && cachedMacro.expiresAt > now) {
+      return Response.json(
+        { indicators: cachedMacro.data, cached: true },
+        {
+          headers: {
+            "Cache-Control": "private, max-age=60",
+          },
+        }
+      );
     }
 
-    // 獲取最新總經數據
+    // 獲取最新總經數據（包含美債、匯率、期貨、債券利差與市場看漲/看跌總結）
     const indicators = await getMacroIndicators();
-    
+
     if (!indicators) {
+      // 若短暫網路異常但有舊快取，安全回退至舊快取
+      if (cachedMacro?.data) {
+        return Response.json({ indicators: cachedMacro.data, cached: true, stale: true });
+      }
       return Response.json({ error: "Failed to fetch macro indicators" }, { status: 500 });
     }
 
-    // 回傳成功 JSON 響應，快取設置為 no-store 以確保即時性
+    cachedMacro = {
+      data: indicators,
+      expiresAt: now + MACRO_CACHE_TTL_MS,
+    };
+
+    // 記下「使用者當下看到的判讀」，事後才能檢討預判失準；用 waitUntil 背景執行，不拖慢回應
+    const cloudflare = (context as any)?.cloudflare;
+    if (cloudflare?.env?.DB) {
+      const snapshotTask = recordMacroSnapshot(cloudflare.env, indicators, "API_VIEW");
+      if (cloudflare.ctx?.waitUntil) cloudflare.ctx.waitUntil(snapshotTask);
+      else await snapshotTask;
+    }
+
     return Response.json(
-      { indicators },
+      { indicators, cached: false },
       {
         headers: {
           "Cache-Control": "no-store",

@@ -26,6 +26,9 @@ type Pages = {
   "/stock-themes": {
     params: {};
   };
+  "/api/macro": {
+    params: {};
+  };
   "/api/top50": {
     params: {};
   };
@@ -137,7 +140,7 @@ type Pages = {
 type RouteFiles = {
   "root.tsx": {
     id: "root";
-    page: "/" | "/dashboard" | "/trade-journal" | "/stock-analysis" | "/stock-themes" | "/api/top50" | "/api/stock/*" | "/api/gemini" | "/api/logout" | "/api/test-telegram" | "/api/test-slack" | "/api/test-strategy" | "/api/test-crypto" | "/api/portfolio" | "/api/analyze-stock" | "/api/stock-brief" | "/api/run-report" | "/api/backtest" | "/backtest" | "/crypto-futures" | "/api/crypto-futures" | "/api/futures-automation" | "/bitget-stock-perps" | "/api/warroom" | "/api/freqtrade/sync" | "/api/freqtrade/research" | "/api/potential-radar/chart" | "/api/webhook/tradingview/:secret" | "/warroom" | "/wave-radar" | "/potential-radar" | "/us-stock-radar" | "/tw-stock-radar" | "/tw-daytrade" | "/tradingview-signals" | "/login" | "/register" | "/portfolio" | "/settings";
+    page: "/" | "/dashboard" | "/trade-journal" | "/stock-analysis" | "/stock-themes" | "/api/macro" | "/api/top50" | "/api/stock/*" | "/api/gemini" | "/api/logout" | "/api/test-telegram" | "/api/test-slack" | "/api/test-strategy" | "/api/test-crypto" | "/api/portfolio" | "/api/analyze-stock" | "/api/stock-brief" | "/api/run-report" | "/api/backtest" | "/backtest" | "/crypto-futures" | "/api/crypto-futures" | "/api/futures-automation" | "/bitget-stock-perps" | "/api/warroom" | "/api/freqtrade/sync" | "/api/freqtrade/research" | "/api/potential-radar/chart" | "/api/webhook/tradingview/:secret" | "/warroom" | "/wave-radar" | "/potential-radar" | "/us-stock-radar" | "/tw-stock-radar" | "/tw-daytrade" | "/tradingview-signals" | "/login" | "/register" | "/portfolio" | "/settings";
   };
   "routes/home.tsx": {
     id: "routes/home";
@@ -158,6 +161,10 @@ type RouteFiles = {
   "routes/stock-themes.tsx": {
     id: "routes/stock-themes";
     page: "/stock-themes";
+  };
+  "routes/api.macro.ts": {
+    id: "routes/api.macro";
+    page: "/api/macro";
   };
   "routes/api.top50.ts": {
     id: "routes/api.top50";
@@ -304,6 +311,7 @@ type RouteModules = {
   "routes/trade-journal": typeof import("./app/routes/trade-journal.tsx");
   "routes/stock-analysis": typeof import("./app/routes/stock-analysis.tsx");
   "routes/stock-themes": typeof import("./app/routes/stock-themes.tsx");
+  "routes/api.macro": typeof import("./app/routes/api.macro.ts");
   "routes/api.top50": typeof import("./app/routes/api.top50.ts");
   "routes/api.stock": typeof import("./app/routes/api.stock.ts");
   "routes/api.gemini": typeof import("./app/routes/api.gemini.ts");

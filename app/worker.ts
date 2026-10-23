@@ -13,8 +13,9 @@ import { pruneTradingviewData } from "./services/tradingview/signalLog";
 import { runCryptoFuturesStopMonitor } from "./services/cryptoAutoTrading/stopMonitor";
 import { syncRegisteredLedgers } from "./services/bitgetLedger/sync.server";
 import { runFuturesAutomation } from "./services/cryptoFutures/automation.server";
+import { runTwPreopenMacroSnapshot } from "./services/macro/snapshotStore.server";
 
-import { SCHEDULES, isUsDailyReportTime } from "./services/scheduledJobs";
+import { SCHEDULES, isTwPreopenSnapshotTime, isUsDailyReportTime } from "./services/scheduledJobs";
 
 const requestHandler = createRequestHandler(build as any);
 
@@ -42,6 +43,10 @@ export default {
             case SCHEDULES.protection:
                 /** 兩種環境各自部署開關與本人授權；舊雷達不因合約自動化開放而啟用。 */
                 ctx.waitUntil(runFuturesAutomation(env).catch(() => console.warn('[Futures Auto] 本輪未完成，留待下輪重試')));
+                if (isTwPreopenSnapshotTime(scheduledAt)) {
+                    // 台北 08:30 寫入羅盤預測快照（D1），只讀公開行情、不發通知；失敗不影響合約保護流程。
+                    ctx.waitUntil(runTwPreopenMacroSnapshot(env).catch(() => console.warn('[Macro Snapshot] 開盤前快照未完成')));
+                }
                 if (scheduledMinute % 5 !== 0) break;
                 /** 原生停損之外的備援與成交對帳維持五分鐘，不因關閉自動新倉而停用。 */
                 ctx.waitUntil((async () => {

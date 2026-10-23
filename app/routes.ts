@@ -7,6 +7,7 @@ export default [
   route("trade-journal", "routes/trade-journal.tsx"),
   route("stock-analysis", "routes/stock-analysis.tsx"),
   route("stock-themes", "routes/stock-themes.tsx"),
+  route("api/macro", "routes/api.macro.ts"),
   route("api/top50", "routes/api.top50.ts"),
   route("api/stock/*", "routes/api.stock.ts"),
   route("api/gemini", "routes/api.gemini.ts"),

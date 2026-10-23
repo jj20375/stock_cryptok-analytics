@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useLoaderData, useRevalidator } from 'react-router';
 import { AppLayout } from '../components/AppLayout';
+import { MacroMarketCompass } from '../features/home/components/MacroMarketCompass';
 import { UsStockPerformancePanel } from '../features/usStockRadar/PerformancePanel';
 import { formatTaipeiTime, UsStockObservationTable, UsStockRadarCard } from '../features/usStockRadar/RadarCards';
 import { StockChartDrawer } from '../features/usStockRadar/StockChartDrawer';
@@ -43,6 +44,8 @@ export default function UsStockRadarPage() {
       <button className="rounded border border-current px-4 py-2 text-sm" disabled={revalidator.state !== 'idle'} onClick={() => revalidator.revalidate()}>
         {revalidator.state === 'idle' ? '更新畫面' : '讀取中…'}</button>
     </header>
+
+    <MacroMarketCompass market="US" />
 
     <section className="space-y-2 rounded-xl border border-black/15 bg-white/70 p-4 text-sm">
       <p><strong>經典吃大魚 2.0：</strong>4 小時 MACD（12／26／9）金叉且收盤 &gt; EMA200 × 0.98，或 Supertrend（ATR 10、係數 4）翻綠；再由已收盤日線 EMA20／50 確認多頭方向。</p>

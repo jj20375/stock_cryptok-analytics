@@ -19,6 +19,7 @@ import { buildScannerPrompt, buildStrategyPrompt } from '../features/home/ai-pro
 import { evaluateDailyVolumeSpike } from '../features/home/scanner-strategies';
 import { HomeHeader } from '../features/home/components/HomeHeader';
 import { LeftSidebar } from '../features/home/components/LeftSidebar';
+import { MacroMarketCompass } from '../features/home/components/MacroMarketCompass';
 import { MainChartPanel } from '../features/home/components/MainChartPanel';
 import { MarketHotPicks } from '../features/home/components/MarketHotPicks';
 import { StockBriefPanel } from '../features/home/components/StockBriefPanel';
@@ -527,6 +528,7 @@ export default function App() {
         />
 
         <div className="lg:col-span-3 flex flex-col gap-4">
+          <MacroMarketCompass market={market} />
           <MarketHotPicks
             hotPicksRef={hotPicksRef}
             market={market}
