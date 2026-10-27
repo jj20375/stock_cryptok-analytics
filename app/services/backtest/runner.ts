@@ -285,7 +285,12 @@ export const runBacktest = async (db: D1Db, backtestId: number): Promise<void> =
       .update(backtests)
       .set({
         status: 'DONE',
-        resultJson: JSON.stringify({ ...metrics, ...(futuresEvaluation ? { futures: futuresEvaluation } : {}) }),
+        resultJson: JSON.stringify({
+          ...metrics,
+          ...(futuresEvaluation ? { futures: futuresEvaluation } : {}),
+          // 一般回測附上空手期間未進場原因，讓 0 筆或極少成交時頁面能說明是哪個條件擋掉
+          ...(simulation.noEntryReasons ? { noEntryReasons: simulation.noEntryReasons } : {}),
+        }),
         equityCurveJson: JSON.stringify(downsampleEquityCurve(equityCurve, 1000)),
         error: null,
       })

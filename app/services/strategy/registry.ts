@@ -27,6 +27,8 @@ import futuresTrendRetest from './strategies/futuresTrendRetest';
 import futuresRangeReclaim from './strategies/futuresRangeReclaim';
 import futuresRsiPullbackResearch from './strategies/futuresRsiPullbackResearch';
 import futuresBigFish from './strategies/futuresBigFish';
+/** 1h→4h 方向評分研究候選：backtestOnly，交易入口會在副作用前拒絕，不會被任何 live 掃描自動帶入。 */
+import hourlyFourHourEdge from './strategies/hourlyFourHourEdge';
 
 /** 全部已註冊策略(id 不可重複) */
 const STRATEGY_MODULES: StrategyModule[] = [
@@ -46,6 +48,7 @@ const STRATEGY_MODULES: StrategyModule[] = [
   futuresRangeReclaim,
   futuresRsiPullbackResearch,
   futuresBigFish,
+  hourlyFourHourEdge,
 ];
 
 const STRATEGY_MAP = new Map<string, StrategyModule>(

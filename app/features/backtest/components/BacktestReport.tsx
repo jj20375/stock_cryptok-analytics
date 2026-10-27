@@ -18,6 +18,11 @@ export function BacktestReport({ detail }: BacktestReportProps) {
   /** 零成交可能是進場被取消，不能一律解讀成沒有訊號；只統計報告實際保留的取消事件。 */
   const cancellations = (result.futures?.events ?? []).filter(event => event.cancelled);
   const diagnostics = result.futures?.diagnostics;
+  /** 空手期間未進場原因，依根數由多到少；成交很少時用來說明是哪個條件擋掉 */
+  const noEntryReasons = Object.entries(result.noEntryReasons ?? {}).sort((a, b) => b[1] - a[1]);
+  const noEntryTotal = noEntryReasons.reduce((sum, [, count]) => sum + count, 0);
+  /** 成交少於 20 筆時樣本不足，同時顯示未進場原因，避免使用者誤以為「沒有數據」是系統錯誤 */
+  const showNoEntryReasons = !result.futures && result.totalTrades < 20 && noEntryTotal > 0;
   const cancelledCount = diagnostics?.cancelled ?? cancellations.length;
   const cancellationReasons = Object.entries(diagnostics?.rejections ?? cancellations.reduce<Record<string, number>>((counts, event) => {
     counts[event.reason] = (counts[event.reason] ?? 0) + 1;
@@ -97,7 +102,11 @@ export function BacktestReport({ detail }: BacktestReportProps) {
         <p>已記錄 {cancelledCount} 次進場取消：</p>
         <ul className="list-disc pl-4">{cancellationReasons.map(([reason, count]) => <li key={reason}>{reason}・{count} 次</li>)}</ul>
         {!diagnostics && result.futures?.eventsTruncated && <p>取消統計只涵蓋報告保留的最新事件。</p>}
-      </> : <p>此報告沒有已記錄的進場取消；需檢查盤勢與策略條件是否成立，不能用 0% 判定策略勝率。</p>}
+      </> : !showNoEntryReasons && <p>此報告沒有已記錄的進場取消；需檢查盤勢與策略條件是否成立，不能用 0% 判定策略勝率。</p>}
+    </div>}
+    {showNoEntryReasons && <div role="status" className="border rounded p-3 text-xs space-y-1">
+      <p>成交只有 {result.totalTrades} 筆。空手期間共評估 {noEntryTotal} 根 K 線，未進場原因如下（可調整對應的策略參數後重跑）：</p>
+      <ul className="list-disc pl-4">{noEntryReasons.slice(0, 6).map(([reason, count]) => <li key={reason}>{reason}・{count} 根（{((count / noEntryTotal) * 100).toFixed(1)}%）</li>)}</ul>
     </div>}
     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
       {kpis.map((kpi) => (

@@ -47,6 +47,8 @@ export interface BacktestResult {
   totalFees: number;
   durationDays: number;
   futures?: ReturnType<typeof import('../../services/cryptoFutures/evaluation').buildFuturesEvaluation>;
+  /** 一般回測空手期間策略未進場的原因與根數（舊回測結果沒有此欄位） */
+  noEntryReasons?: Record<string, number>;
 }
 
 /** 權益曲線單點 */

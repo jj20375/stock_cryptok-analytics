@@ -106,7 +106,15 @@ export interface EngineResult {
   /** 只計算研究區間；未成立條件按空手根統計，取消按候選委託統計，不混成勝率。 */
   entryDiagnostics?: { evaluatedBars: number; signals: number; filled: number; cancelled: number; pending: number;
     phases: Record<FuturesPhase, number>; filters: Record<string, number>; rejections: Record<string, number> };
+  /**
+   * 一般（非合約）回測：空手時策略回傳 HOLD 的原因次數，只統計研究區間。
+   * 用來回答「為什麼 0 筆成交」（例如 1h→4h 策略的 ATR 波動下限把 BTC 全部濾掉），不影響任何成交計算。
+   */
+  noEntryReasons?: Record<string, number>;
 }
+
+/** 未進場原因最多保留的種類數；含動態數字的原因若超過上限，其餘併入「其他原因」，避免結果 JSON 膨脹 */
+const MAX_NO_ENTRY_REASON_KINDS = 20;
 
 /** 待成交動作(fillMode='nextOpen' 時暫存到下一根執行) */
 type PendingOrder =
@@ -136,6 +144,8 @@ export const runBacktestEngine = (
   const trades: BacktestTradeRecord[] = [];
   const equityCurve: EquityPoint[] = [];
   const events: EngineEvent[] = [];
+  /** 一般回測的空手 HOLD 原因統計（見 EngineResult.noEntryReasons） */
+  const noEntryReasons: Record<string, number> = {};
   const entryDiagnostics: NonNullable<EngineResult['entryDiagnostics']> = { evaluatedBars: 0, signals: 0, filled: 0, cancelled: 0, pending: 0,
     phases: { UP: 0, DOWN: 0, RANGE: 0, WAIT: 0, SHOCK: 0 }, filters: {}, rejections: {} };
   const recordEvent = (event: EngineEvent) => {
@@ -409,6 +419,10 @@ export const runBacktestEngine = (
       if (config.futures && !position && action.type === 'HOLD') {
         const reason = action.reason ?? '策略條件尚未成立';
         entryDiagnostics.filters[reason] = (entryDiagnostics.filters[reason] ?? 0) + 1;
+      } else if (!config.futures && !position && action.type === 'HOLD') {
+        const raw = action.reason ?? '策略條件尚未成立';
+        const reason = raw in noEntryReasons || Object.keys(noEntryReasons).length < MAX_NO_ENTRY_REASON_KINDS ? raw : '其他原因';
+        noEntryReasons[reason] = (noEntryReasons[reason] ?? 0) + 1;
       }
 
       if (action.type === 'ENTRY' && !position) {
@@ -468,5 +482,5 @@ export const runBacktestEngine = (
     reason: `${waiting.kind === 'ENTRY' ? '進場' : '平倉'}待下一根開盤確認：${waiting.kind === 'ENTRY' ? waiting.action.reason : waiting.reason}`,
   } : null;
   entryDiagnostics.pending = pending?.kind === 'ENTRY' ? 1 : 0;
-  return { trades, equityCurve, firstEvaluatedIndex, events, pendingSignal, ...(config.futures ? { entryDiagnostics } : {}) };
+  return { trades, equityCurve, firstEvaluatedIndex, events, pendingSignal, ...(config.futures ? { entryDiagnostics } : { noEntryReasons }) };
 };
