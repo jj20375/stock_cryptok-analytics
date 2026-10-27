@@ -13,7 +13,8 @@ import {
   Shield,
   Radar,
   Satellite,
-  Newspaper
+  Newspaper,
+  Crosshair
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -46,6 +47,10 @@ export function AppLayout({ children }: { children: ReactNode }) {
         <nav className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto w-full px-2">
           <Link to="/dashboard" className={navLinkClass("/dashboard")} title="交易績效 Dashboard">
             <LayoutGrid size={20} />
+          </Link>
+          {/* 即時戰略 Dashboard：台股／美股／虛擬幣候選清單，唯讀、不下單 */}
+          <Link to="/strategy-dashboard" className={navLinkClass('/strategy-dashboard')} title="即時戰略 Dashboard" aria-label="即時戰略 Dashboard">
+            <Crosshair size={20} />
           </Link>
           <Link to="/trade-journal" className={navLinkClass('/trade-journal')} title="Bitget 交易復盤" aria-label="Bitget 交易復盤">
             <List size={20} />
@@ -122,6 +127,9 @@ export function AppLayout({ children }: { children: ReactNode }) {
         <Link to="/stock-themes" className={navLinkClass('/stock-themes')} title="題材與財報" aria-label="題材與財報"><Newspaper size={20} /></Link>
         <Link to="/dashboard" className={navLinkClass("/dashboard")}>
           <LayoutGrid size={20} />
+        </Link>
+        <Link to="/strategy-dashboard" className={navLinkClass('/strategy-dashboard')} title="即時戰略 Dashboard" aria-label="即時戰略 Dashboard">
+          <Crosshair size={20} />
         </Link>
         <Link to="/backtest" className={navLinkClass("/backtest")}>
           <FlaskConical size={20} />

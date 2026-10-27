@@ -4,6 +4,8 @@ import { type RouteConfig, index, route } from "@react-router/dev/routes";
 export default [
   index("routes/home.tsx"),
   route("dashboard", "routes/dashboard.tsx"),
+  route("strategy-dashboard", "routes/strategy-dashboard.tsx"),
+  route("api/strategy-dashboard", "routes/api.strategy-dashboard.ts"),
   route("trade-journal", "routes/trade-journal.tsx"),
   route("stock-analysis", "routes/stock-analysis.tsx"),
   route("stock-themes", "routes/stock-themes.tsx"),
