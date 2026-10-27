@@ -5,6 +5,7 @@ import type { LoaderFunctionArgs } from 'react-router';
 import { potentialRadar } from '../db/potentialSchema';
 import { fetchBinanceRange, intervalToMs } from '../services/marketData/binanceHistory';
 import { parsePotentialChartRequest, POTENTIAL_CHART_WINDOWS } from '../services/potentialRadar/chartRequest';
+import { fetchUniverse } from '../services/potentialRadar/market';
 import type { RadarSnapshot } from '../services/potentialRadar/types';
 import { getUserId } from '../utils/auth';
 
@@ -22,12 +23,15 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   try {
     const row = await drizzle(env.DB).select().from(potentialRadar)
       .where(eq(potentialRadar.symbol, chartRequest.symbol)).get();
-    if (!row) return jsonError('此標的目前沒有可用的雷達快照。', 404);
-
-    const snapshot = JSON.parse(row.snapshotJson) as RadarSnapshot;
+    const snapshot = row ? JSON.parse(row.snapshotJson) as RadarSnapshot : null;
     /** 舊快照的 source 依資料契約視為 Bybit；來源仍必須和當輪鎖定交易所相同，避免行情混用。 */
-    const snapshotSource = snapshot.signal?.source ?? 'BYBIT_SPOT';
-    if (!snapshot.signal || snapshotSource !== chartRequest.source) {
+    const scanned = !!snapshot?.signal && (snapshot.signal.source ?? 'BYBIT_SPOT') === chartRequest.source;
+    /**
+     * 即時戰略 Dashboard 的即時補算結果不寫入 D1；此時改以「該交易所目前流動性合格的 USDT 現貨池」驗證，
+     * 仍不接受任意交易對。只有 D1 無對應快照時才多打一次公開名單請求。
+     */
+    if (!scanned && !(await fetchUniverse(chartRequest.source).catch(() => []))
+      .some(coin => coin.symbol === chartRequest.symbol)) {
       return jsonError('此標的目前沒有可用的雷達快照。', 404);
     }
 
