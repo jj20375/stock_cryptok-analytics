@@ -36,6 +36,8 @@ export default [
   route("warroom", "routes/warroom.tsx"),
   route("wave-radar", "routes/wave-radar.tsx"),
   route("potential-radar", "routes/potential-radar.tsx"),
+  route("meme-desk", "routes/meme-desk.tsx"),
+  route("api/meme-desk", "routes/api.meme-desk.ts"),
   route("us-stock-radar", "routes/us-stock-radar.tsx"),
   route("tw-stock-radar", "routes/tw-stock-radar.tsx"),
   route("tw-daytrade", "routes/tw-daytrade.tsx"),

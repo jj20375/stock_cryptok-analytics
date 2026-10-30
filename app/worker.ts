@@ -14,6 +14,7 @@ import { runCryptoFuturesStopMonitor } from "./services/cryptoAutoTrading/stopMo
 import { syncRegisteredLedgers } from "./services/bitgetLedger/sync.server";
 import { runFuturesAutomation } from "./services/cryptoFutures/automation.server";
 import { runTwPreopenMacroSnapshot } from "./services/macro/snapshotStore.server";
+import { runScheduledMemeDeskRoutine } from "./services/memeDesk/deskRunner";
 
 import { SCHEDULES, isTwPreopenSnapshotTime, isUsDailyReportTime } from "./services/scheduledJobs";
 
@@ -46,6 +47,10 @@ export default {
                 if (isTwPreopenSnapshotTime(scheduledAt)) {
                     // 台北 08:30 寫入羅盤預測快照（D1），只讀公開行情、不發通知；失敗不影響合約保護流程。
                     ctx.waitUntil(runTwPreopenMacroSnapshot(env).catch(() => console.warn('[Macro Snapshot] 開盤前快照未完成')));
+                }
+                if (scheduledMinute % 10 === 0) {
+                    // Solana 迷因幣戰情室：每 10 分鐘巡檢模擬持倉出場條件，每 30 分鐘（若啟用）掃描新代幣。
+                    ctx.waitUntil(runScheduledMemeDeskRoutine(env, scheduledAt).catch(() => console.warn('[Meme Desk] 排程巡檢未完成')));
                 }
                 if (scheduledMinute % 5 !== 0) break;
                 /** 原生停損之外的備援與成交對帳維持五分鐘，不因關閉自動新倉而停用。 */

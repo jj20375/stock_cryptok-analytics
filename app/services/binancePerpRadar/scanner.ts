@@ -91,14 +91,14 @@ async function collectScan(startedAt: number, notificationsEnabled: boolean, sha
           if (!signal) continue;
           const quality = classifyPerpSignal(series, signal);
           const markPrice = series.at(-1)!.close;
-          /** 自動交易只看最新收盤根；歷史補報可通知，但不能拿舊進場價送單。 */
+          /** 自動交易只看最新收盤根且須通過高勝率品質把關（排除空頭深水區反彈、過度延伸與長上影線）；一般訊號仍保留 Slack 觀察通知。 */
           if (offset === 0 && signal.flippedRed) {
             autoFound.push({
               id: `internal:${ticker.symbol}:${signal.barTime}:exit:${BINANCE_PERP_RULES.version}`,
               source: 'INTERNAL', symbol: ticker.symbol, action: 'SELL', signalAt: signal.barTime + PERP_BAR_MS,
               referencePrice: markPrice, label: '吃大魚 Supertrend 翻紅出場',
             });
-          } else if (offset === 0 && signal.entry && quality.grade !== 'EARLY_MACD') {
+          } else if (offset === 0 && signal.entry && quality.autoTradeEligible) {
             autoFound.push({
               id: `internal:${ticker.symbol}:${signal.barTime}:entry:${BINANCE_PERP_RULES.version}`,
               source: 'INTERNAL', symbol: ticker.symbol, action: 'BUY', signalAt: signal.barTime + PERP_BAR_MS,

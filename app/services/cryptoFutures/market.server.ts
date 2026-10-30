@@ -110,11 +110,35 @@ export type FuturesResearchMetadata = Pick<Awaited<ReturnType<typeof futuresMeta
  * 讓全市場掃描涵蓋約 55 個合約；價差與深度兩道檢查不變，仍限制小幣滑價。
  */
 export const FUTURES_MIN_QUOTE_VOLUME_USDT = 10_000_000;
+/**
+ * 【詳細繁體中文註解】：最新成交價與標記價（Mark Price）的最大允許基差百分比（0.5%）。
+ * 當基差過大時，市價進場會立即承受不利偏離，且極易被標記價觸發原生停損。
+ */
+export const FUTURES_MAX_BASIS_PCT = 0.5;
+/**
+ * 【詳細繁體中文註解】：單期資金費率極端擁擠門檻（0.15%，即 0.0015）。
+ * 做多時若資金費率 >= +0.15%，或做空時 <= -0.15%，代表同向槓桿過度擁擠，阻擋追價開倉。
+ */
+export const FUTURES_MAX_ADVERSE_FUNDING_RATE = 0.0015;
 
-/** 目前流動性只用於新倉，不回填到過去訊號。 */
-export function futuresLiquidityError(metadata: Awaited<ReturnType<typeof futuresMetadata>>, notional: number) {
+/** 目前流動性與合約籌碼擁擠度檢查只用於新倉，不回填到過去訊號。 */
+export function futuresLiquidityError(
+  metadata: Awaited<ReturnType<typeof futuresMetadata>>,
+  notional: number,
+  side?: 'LONG' | 'SHORT',
+) {
   if (!Number.isFinite(metadata.quoteVolume) || metadata.quoteVolume < FUTURES_MIN_QUOTE_VOLUME_USDT) return '永續近 24H 成交額不足 1,000 萬 USDT';
   if (metadata.spreadPct < 0 || metadata.spreadPct > 0.15) return '合約買賣價差超過 0.15%';
   if (notional > Math.min(metadata.bidDepthUsdt, metadata.askDepthUsdt) * 0.01) return '名目部位超過附近雙邊深度的 1%';
+  if (Number.isFinite(metadata.markPrice) && metadata.markPrice > 0 && Number.isFinite(metadata.price)) {
+    const basisPct = Math.abs(metadata.price - metadata.markPrice) / metadata.markPrice * 100;
+    if (basisPct > FUTURES_MAX_BASIS_PCT) return `合約成交價與標記價基差過大（${basisPct.toFixed(2)}%）`;
+  }
+  if (side && Number.isFinite(metadata.fundingRate)) {
+    const adverseFunding = side === 'LONG' ? metadata.fundingRate : -metadata.fundingRate;
+    if (adverseFunding >= FUTURES_MAX_ADVERSE_FUNDING_RATE) {
+      return `合約${side === 'LONG' ? '多頭' : '空頭'}資金費率極度擁擠（${(metadata.fundingRate * 100).toFixed(3)}%）`;
+    }
+  }
   return null;
 }

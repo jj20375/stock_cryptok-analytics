@@ -35,6 +35,18 @@ export async function futuresProtectionReason(env: CryptoFuturesTradingEnv, trad
   const last = bars.at(-1);
   if (!last || last.openTime !== end) throw new Error('持倉保護缺最新已收盤合約行情');
   if (plan.invalidationPrice != null && (short ? last.close > plan.invalidationPrice : last.close < plan.invalidationPrice)) return '1H 收盤結構失效';
+  /**
+   * 1R 保本推進保護：若持倉期間已收盤 K 線曾達 breakevenTriggerR 倍初始風險，
+   * 當標記價回撤跌破（空單突破）含雙邊手續費緩衝的保本價時，主動觸發保護平倉，防止獲利單變成全額停損。
+   */
+  const triggerR = Number(plan.breakevenTriggerR ?? 0);
+  const initialRisk = Math.abs(entry - stop);
+  if (triggerR > 0 && initialRisk > 0) {
+    const heldBars = bars.filter(b => b.openTime >= Math.floor(openedAt / HOUR_MS) * HOUR_MS);
+    const reachedTriggerR = heldBars.some(b => short ? b.low <= entry - initialRisk * triggerR : b.high >= entry + initialRisk * triggerR);
+    const breakevenPrice = entry * (short ? 1 - 2 * 0.0006 : 1 + 2 * 0.0006);
+    if (reachedTriggerR && (short ? markPrice >= breakevenPrice : markPrice <= breakevenPrice)) return '達到 1R 後回撤觸及保本保護';
+  }
   if (snapshot.strategyId === 'futures_range_reclaim') {
     const full = bars.filter((c, i) => i >= 3 && (c.openTime + HOUR_MS) % (4 * HOUR_MS) === 0).map(c => {
       const i = bars.indexOf(c), group = bars.slice(i - 3, i + 1);

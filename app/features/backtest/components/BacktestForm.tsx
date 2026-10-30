@@ -30,11 +30,15 @@ interface BacktestFormProps {
 
 const VALID_MARKETS = ['CRYPTO', 'US', 'TW'] as const;
 
-/** 依市場慣例正規化代號(加密貨幣自動補 USDT 結尾) */
+/** 依市場慣例正規化代號(加密貨幣支援 BTC/USD、BTC-USD 自動轉為 BTCUSDT) */
 const normalizeSymbol = (raw: string, market: 'CRYPTO' | 'US' | 'TW'): string => {
   const trimmed = raw.trim().toUpperCase();
   if (!trimmed) return '';
-  return market === 'CRYPTO' && !trimmed.endsWith('USDT') ? `${trimmed}USDT` : trimmed;
+  if (market === 'CRYPTO') {
+    const cleaned = trimmed.replace(/[\/\-]USDT$/, '').replace(/[\/\-]USD$/, '').replace(/[^A-Z0-9]/g, '');
+    return cleaned.endsWith('USDT') ? cleaned : `${cleaned}USDT`;
+  }
+  return trimmed;
 };
 
 export function BacktestForm({
@@ -79,7 +83,7 @@ export function BacktestForm({
     return market === 'US' ? mergeExtraUsTickers(base, extraUsTickers) : base;
   }, [market, extraUsTickers]);
   const marketStrategies = useMemo(
-    () => strategies.filter((s) => s.markets.includes(market) && (futures ? s.supportedIntervals.includes('1h') && (s.futuresOnly || s.id === 'big_fish') : !s.futuresOnly)),
+    () => strategies.filter((s) => s.markets.includes(market) && (futures ? s.supportedIntervals.includes('1h') && (s.futuresOnly || s.id === 'big_fish' || s.id === 'big_fish_pro') : !s.futuresOnly)),
     [strategies, market, futures]
   );
   const selectedStrategy = marketStrategies.find((s) => s.id === strategyId) ?? null;
@@ -103,7 +107,7 @@ export function BacktestForm({
   useEffect(() => {
     if (futures) {
       setMarket('CRYPTO'); setInterval('1h');
-      setStrategyId(initialStrategyId?.startsWith('futures_') ? initialStrategyId : 'futures_trend_retest');
+      setStrategyId(initialStrategyId?.startsWith('futures_') || initialStrategyId === 'big_fish_pro' ? initialStrategyId : 'futures_trend_retest');
       setExecution(previous => ({ ...previous, feeRatePct: 0.06, sellTaxRatePct: 0, maxRiskPerTradePct: 0.25, maxPositionSizePct: 5, fillMode: 'nextOpen' }));
     }
   }, [futures]);

@@ -402,6 +402,32 @@ export const runBacktestEngine = (
       }
     }
 
+    if (position) {
+      const pos = position as OpenPositionState;
+      const triggerR = pos.entryPlan?.breakevenTriggerR;
+      const excursionCandle = config.futures ? marks.get(candle.openTime) ?? candle : candle;
+      if (triggerR != null && triggerR > 0 && pos.stopLossPrice != null) {
+        /**
+         * 1R 保本推進保護：僅在當根未觸及原始停損與固定目標後才檢查；
+         * 一旦當根有利極值達 triggerR 倍初始價格風險，下一根起將停損移至含雙邊手續費緩衝的保本價，
+         * 避免同根先假設觸及 1R 再保本的前視偏差，同時杜絕獲利單反轉變成全額 1R 虧損。
+         */
+        if (pos.side === 'LONG' && pos.stopLossPrice < pos.entryPrice) {
+          const initialRisk = pos.entryPrice - pos.stopLossPrice;
+          if (excursionCandle.high >= pos.entryPrice + initialRisk * triggerR) {
+            const feeRate = config.cost.feeRate;
+            pos.stopLossPrice = Math.max(pos.stopLossPrice, pos.entryPrice * (1 + feeRate) / Math.max(1e-6, 1 - feeRate));
+          }
+        } else if (pos.side === 'SHORT' && pos.stopLossPrice > pos.entryPrice) {
+          const initialRisk = pos.stopLossPrice - pos.entryPrice;
+          if (excursionCandle.low <= pos.entryPrice - initialRisk * triggerR) {
+            const feeRate = config.cost.feeRate;
+            pos.stopLossPrice = Math.min(pos.stopLossPrice, pos.entryPrice * (1 - feeRate) / (1 + feeRate));
+          }
+        }
+      }
+    }
+
     // 3) 策略評估(嚴禁前視:evaluate 只能讀 index 及之前的資料)
     if (inTradeWindow) {
       const context = {

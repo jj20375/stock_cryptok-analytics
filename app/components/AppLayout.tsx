@@ -14,7 +14,8 @@ import {
   Radar,
   Satellite,
   Newspaper,
-  Crosshair
+  Crosshair,
+  ShieldAlert
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -51,6 +52,10 @@ export function AppLayout({ children }: { children: ReactNode }) {
           {/* 即時戰略 Dashboard：台股／美股／虛擬幣候選清單，唯讀、不下單 */}
           <Link to="/strategy-dashboard" className={navLinkClass('/strategy-dashboard')} title="即時戰略 Dashboard" aria-label="即時戰略 Dashboard">
             <Crosshair size={20} />
+          </Link>
+          {/* Solana 14 關防 Rug 戰情室：置於上方顯眼處並使用獨立 ShieldAlert 圖示 */}
+          <Link to="/meme-desk" className={navLinkClass('/meme-desk')} title="Solana 14 關防 Rug 戰情室" aria-label="Solana 14 關防 Rug 戰情室">
+            <ShieldAlert size={20} />
           </Link>
           <Link to="/trade-journal" className={navLinkClass('/trade-journal')} title="Bitget 交易復盤" aria-label="Bitget 交易復盤">
             <List size={20} />
@@ -130,6 +135,9 @@ export function AppLayout({ children }: { children: ReactNode }) {
         </Link>
         <Link to="/strategy-dashboard" className={navLinkClass('/strategy-dashboard')} title="即時戰略 Dashboard" aria-label="即時戰略 Dashboard">
           <Crosshair size={20} />
+        </Link>
+        <Link to="/meme-desk" className={navLinkClass('/meme-desk')} title="Solana 14 關防 Rug 戰情室" aria-label="Solana 14 關防 Rug 戰情室">
+          <ShieldAlert size={20} />
         </Link>
         <Link to="/backtest" className={navLinkClass("/backtest")}>
           <FlaskConical size={20} />

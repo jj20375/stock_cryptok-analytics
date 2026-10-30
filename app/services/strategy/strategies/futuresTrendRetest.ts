@@ -37,15 +37,28 @@ const futuresTrendRetest: StrategyModule = {
       const prior = c.slice(j - p.breakoutBars, j);
       if (prior.length !== p.breakoutBars) continue;
       const level = side === 'LONG' ? Math.max(...prior.map(bar => bar.high)) : Math.min(...prior.map(bar => bar.low));
-      if (sign * (c[j].close - level) <= 0) continue;
+      const avgPriorVolume = prior.reduce((sum, bar) => sum + bar.volume, 0) / prior.length;
+      /** 突破根需具備基本量能支撐（至少達前窗口均量的 90%），排除縮量假突破。 */
+      if (sign * (c[j].close - level) <= 0 || (avgPriorVolume > 0 && c[j].volume < avgPriorVolume * 0.9)) continue;
       stage = Math.max(stage, 1);
       const retest = c.slice(j + 1, i + 1);
       /** 六根內曾回踩即可；確認根收盤須重新守住突破位，不能要求每根回踩都已確認。 */
       if (!retest.some(bar => side === 'LONG' ? bar.low <= level + atr * p.bufferAtr : bar.high >= level - atr * p.bufferAtr)) continue;
       stage = Math.max(stage, 2);
-      /** 已收盤根的高／低點確認突破，收盤亦須同向推進；不用未收盤資料或未來根。 */
+      /**
+       * 已收盤根的高／低點確認突破，收盤亦須同向推進；
+       * 同時要求確認根為同向實體（多頭收紅／平盤、空頭收黑／平盤）、收盤位於當根全距有利側（>= 0.5）且量能未萎縮（>= 均量 85%），
+       * 排除長反向影線誘多／誘空與縮量虛假確認。
+       */
+      const candleRange = current.high - current.low;
+      const directionalCloseStrength = candleRange > 0
+        ? (side === 'LONG' ? (current.close - current.low) / candleRange : (current.high - current.close) / candleRange)
+        : 0;
       if (sign * (current.close - level) < 0 || sign * (current.close - c[i - 1].close) <= 0
-        || (side === 'LONG' ? current.high <= c[i - 1].high : current.low >= c[i - 1].low)) continue;
+        || (side === 'LONG' ? current.high <= c[i - 1].high : current.low >= c[i - 1].low)
+        || sign * (current.close - current.open) < 0
+        || directionalCloseStrength < 0.5 - 1e-9
+        || (avgPriorVolume > 0 && current.volume < avgPriorVolume * 0.85)) continue;
       stage = Math.max(stage, 3);
       if (sign * (current.close - level) > atr * p.maxExtensionAtr) continue;
       stage = Math.max(stage, 4);
@@ -56,7 +69,7 @@ const futuresTrendRetest: StrategyModule = {
       return { type: 'ENTRY', side, entryPlan: { stopDistance, stopPrice, minStopDistance: atr * p.minStopAtr, maxStopDistance: atr * p.maxStopAtr,
         minPrice: side === 'LONG' ? level : level - atr * p.maxExtensionAtr,
         maxPrice: side === 'LONG' ? level + atr * p.maxExtensionAtr : level,
-        targetMultiple: p.targetR, minRewardRisk: 1.5, invalidationPrice: level },
+        targetMultiple: p.targetR, minRewardRisk: 1.5, invalidationPrice: level, breakevenTriggerR: 1 },
         reason: `${state.reason}・1H 回踩 ${level.toPrecision(6)} 後確認${side === 'LONG' ? '轉強開多' : '轉弱開空'}` };
     }
     return { type: 'HOLD', reason: ['尚無前窗口收盤突破', '突破後尚未回踩', '回踩後尚未收盤確認',

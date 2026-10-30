@@ -31,12 +31,14 @@ const futuresRangeReclaim: StrategyModule = {
     if (state.phase !== 'RANGE') return { type: 'HOLD', reason: '4H 盤勢未符合區間策略' };
     const history = c.slice(i - 1 - p.rangeBars, i - 1), reclaim = c[i - 1], atr = state.atr;
     const floor = Math.min(...history.map(bar => bar.low)), ceiling = Math.max(...history.map(bar => bar.high)), targetPrice = (floor + ceiling) / 2;
-    /** 收回與下一根確認是兩階段；已收盤根突破前根極值且收盤同向推進，保留中點目標空間。 */
+    const avgHistoryVolume = history.length > 0 ? history.reduce((sum, bar) => sum + bar.volume, 0) / history.length : 0;
+    /** 收回與下一根確認是兩階段；已收盤根突破前根極值、收盤同向推進且具同向實體與基本量能（>= 區間均量 80%），保留中點目標空間。 */
     const longSetup = reclaim.low < floor && reclaim.close > floor && reclaim.close < ceiling;
     const shortSetup = reclaim.high > ceiling && reclaim.close < ceiling && reclaim.close > floor;
     if (!longSetup && !shortSetup) return { type: 'HOLD', reason: '尚無假突破收回區間' };
-    const long = longSetup && current.high > reclaim.high && current.close > reclaim.close;
-    const short = shortSetup && current.low < reclaim.low && current.close < reclaim.close;
+    const hasConfirmationVolume = avgHistoryVolume <= 0 || current.volume >= avgHistoryVolume * 0.8;
+    const long = longSetup && current.high > reclaim.high && current.close > reclaim.close && current.close >= current.open && hasConfirmationVolume;
+    const short = shortSetup && current.low < reclaim.low && current.close < reclaim.close && current.close <= current.open && hasConfirmationVolume;
     if (long === short || current.close <= floor || current.close >= ceiling) return { type: 'HOLD', reason: '收回後尚未收盤確認' };
     const side = long ? 'LONG' : 'SHORT', sign = long ? 1 : -1;
     const stopPrice = (long ? reclaim.low : reclaim.high) - sign * atr * p.bufferAtr;
@@ -45,7 +47,7 @@ const futuresRangeReclaim: StrategyModule = {
     if (sign * (targetPrice - current.close) <= 0) return { type: 'HOLD', reason: '確認時價格已到區間中點' };
     return { type: 'ENTRY', side, entryPlan: { stopDistance, stopPrice, minStopDistance: atr * p.minStopAtr, maxStopDistance: atr * p.maxStopAtr,
       minPrice: Math.max(floor, current.close - atr * p.maxExtensionAtr), maxPrice: Math.min(ceiling, current.close + atr * p.maxExtensionAtr),
-      targetPrice, minRewardRisk: p.minRewardRisk, invalidationPrice: long ? floor : ceiling },
+      targetPrice, minRewardRisk: p.minRewardRisk, invalidationPrice: long ? floor : ceiling, breakevenTriggerR: 1 },
       reason: `${state.reason}・假突破收回並確認${long ? '開多' : '開空'}・固定區間目標 ${targetPrice.toPrecision(6)}` };
   },
 };

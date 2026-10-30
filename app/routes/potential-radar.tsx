@@ -66,7 +66,7 @@ export default function PotentialRadarPage() {
     <header className="flex flex-wrap justify-between items-start gap-4">
       <div><p className="text-xs tracking-widest opacity-60 mb-2">CRYPTO WATCHLIST</p><h1 className="text-3xl font-bold">潛力幣雷達</h1>
         <p className="text-sm mt-3 opacity-75">15 分提早發現 · 1 小時確認動能 · 4 小時判斷趨勢</p></div>
-      <div className="flex items-center gap-4 text-sm"><Link to="/wave-radar" className="underline">波段雷達</Link>
+      <div className="flex items-center gap-4 text-sm"><Link to="/meme-desk" className="underline font-semibold">Solana 防 Rug 戰情室</Link><Link to="/wave-radar" className="underline">波段雷達</Link>
         <button className="border border-current rounded px-4 py-2" disabled={revalidator.state !== 'idle'} onClick={() => revalidator.revalidate()}>
           {revalidator.state === 'idle' ? '更新畫面' : '讀取中…'}</button></div>
     </header>

@@ -11,6 +11,7 @@ export { twStockRadar, twStockObservations, twStockRadarRun, twStockRadarNotific
 export { cryptoAutoOrders } from './cryptoAutoTradeSchema';
 export { futuresAutomation, futuresAutomationEvents, futuresAutomationCandles } from './futuresAutomationSchema';
 export { macroOutlookSnapshots } from './macroSnapshotSchema';
+export { memeDeskChecks, memeDeskPositions, memeDeskTrades } from './memeDeskSchema';
 
 // 【詳細繁體中文註解】：使用者資料表
 export const users = sqliteTable('users', {

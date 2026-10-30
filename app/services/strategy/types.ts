@@ -30,6 +30,8 @@ export interface StrategyEntryPlan {
   targetPrice?: number;
   minRewardRisk?: number;
   breakoutPrice?: number;
+  /** 當有利推進達指定 R 倍數（例如 1R）時，將停損移至含雙邊手續費緩衝的保本價，防止獲利單反轉變成全額虧損。 */
+  breakevenTriggerR?: number;
 }
 
 /** 單根 K 線。時間一律為毫秒 UTC timestamp */

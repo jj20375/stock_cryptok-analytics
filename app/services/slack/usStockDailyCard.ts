@@ -6,6 +6,7 @@ export interface UsDailyMover {
   name: string;
   changePercent: number;
   volume: number;
+  themeBadge?: string;
 }
 
 export interface UsDailyMacro {
@@ -23,6 +24,7 @@ export interface UsDailyStrategyCandidate {
   score: number;
   reason: string;
   trend: 'up' | 'down';
+  themeBadge?: string;
 }
 
 export interface UsDailyStrategySection {
@@ -39,6 +41,7 @@ export interface UsStockDailyCardInput {
   mostActive: UsDailyMover[];
   macro?: UsDailyMacro | null;
   strategySections?: UsDailyStrategySection[];
+  themeSummary?: string;
 }
 
 const truncate = (value: string, maximum: number) => value.length <= maximum ? value : `${value.slice(0, maximum - 1)}…`;
@@ -53,17 +56,24 @@ const moverName = (item?: UsDailyMover) => item
   : '暫無資料';
 
 const formatGainers = (items: UsDailyMover[]) => items.length
-  ? items.slice(0, 5).map((item, index) => `${index + 1}. *${escapeMrkdwn(item.symbol)}*  ${percent(item.changePercent)}\n   ${escapeMrkdwn(truncate(item.name, 44))}`).join('\n')
+  ? items.slice(0, 5).map((item, index) => {
+      const badge = item.themeBadge ? `\n   ${escapeMrkdwn(item.themeBadge)}` : '';
+      return `${index + 1}. *${escapeMrkdwn(item.symbol)}*  ${percent(item.changePercent)}\n   ${escapeMrkdwn(truncate(item.name, 44))}${badge}`;
+    }).join('\n')
   : '暫無資料';
 
 const formatActive = (items: UsDailyMover[]) => items.length
-  ? items.slice(0, 5).map((item, index) => `${index + 1}. *${escapeMrkdwn(item.symbol)}*  ${volume(item.volume)}\n   ${escapeMrkdwn(truncate(item.name, 44))}`).join('\n')
+  ? items.slice(0, 5).map((item, index) => {
+      const badge = item.themeBadge ? `\n   ${escapeMrkdwn(item.themeBadge)}` : '';
+      return `${index + 1}. *${escapeMrkdwn(item.symbol)}*  ${volume(item.volume)}\n   ${escapeMrkdwn(truncate(item.name, 44))}${badge}`;
+    }).join('\n')
   : '暫無資料';
 
 const formatCandidates = (items: UsDailyStrategyCandidate[]) => items.length
   ? items.slice(0, 5).map((item, index) => {
       const trend = item.trend === 'up' ? '偏多' : '偏空';
-      return `${index + 1}. *${escapeMrkdwn(item.symbol)}* · ${item.score} 分 · ${trend}\n   ${escapeMrkdwn(truncate(item.reason, 100))}`;
+      const badge = item.themeBadge ? `\n   └ ${escapeMrkdwn(item.themeBadge)}` : '';
+      return `${index + 1}. *${escapeMrkdwn(item.symbol)}* · ${item.score} 分 · ${trend}\n   ${escapeMrkdwn(truncate(item.reason, 100))}${badge}`;
     }).join('\n')
   : '本輪沒有符合條件的候選';
 
@@ -90,6 +100,13 @@ export function createUsStockDailyCard(input: UsStockDailyCardInput): SlackPostP
         { type: 'mrkdwn', text: `*10Y–3M 利差*\n${escapeMrkdwn(input.macro.yieldSpread)}` },
       ] },
     );
+  }
+
+  if (input.themeSummary) {
+    blocks.push({
+      type: 'section',
+      text: { type: 'mrkdwn', text: `*🎯 產業與 AI 題材風向*\n${escapeMrkdwn(input.themeSummary)}` },
+    });
   }
 
   blocks.push({ type: 'divider' });

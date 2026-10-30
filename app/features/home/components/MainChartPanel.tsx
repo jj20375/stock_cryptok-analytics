@@ -4,6 +4,7 @@ import { useMemo } from 'react';
 import { cn } from '../../../utils/cn';
 import { VelaChart } from './VelaChart';
 import { StrategyLayerPanel } from './StrategyLayerPanel';
+import { BigFishProGannPanel } from './BigFishProGannPanel';
 import { MarketQuoteCards } from './MarketQuoteCards';
 import { ChartRangePanel, CHART_TIMEFRAME_LABELS } from '../../../components/ChartRangePanel';
 import { MARKET_CHART_TIMEZONES } from '../../../utils/chartDate';
@@ -112,6 +113,12 @@ export function MainChartPanel({
           onSetEnabledStrategyLayers={onSetEnabledStrategyLayers}
         />
       </div>
+
+      <BigFishProGannPanel
+        symbol={selectedStock.symbol}
+        timeframe={timeframe}
+        data={allData}
+      />
 
       {/* Vela 主圖保留足夠高度，讓工作區按容器尺寸分配價格圖與副圖。 */}
       <section className="border border-[#141414] p-3 md:p-4 bg-white min-h-[980px] md:min-h-[820px] h-[94vh] md:h-[92vh] max-h-[1500px] rounded-sm relative flex flex-col overflow-hidden">

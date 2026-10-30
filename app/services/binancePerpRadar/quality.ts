@@ -26,6 +26,11 @@ export const PERP_BEST_SIGNAL_RULES = {
   maximumPriorLongChangePct: 15,
   /** 翻綠收盤距防守線超過 12% 已偏離啟動點，不列最高優先。 */
   maximumSupertrendDistancePct: 12,
+  /**
+   * 【詳細繁體中文註解】：觸發根 K 線收盤位於當根高低振幅的最低比例（0 ~ 1）。
+   * 設為 0.55 代表收盤價必須落在當根 K 線中上緣，排除衝高回落留長上影線的假突破。
+   */
+  minimumCloseStrength: 0.55,
 } as const;
 
 export type PerpSignalGrade = 'BEST' | 'TREND_FLIP' | 'EARLY_MACD';
@@ -39,6 +44,10 @@ export interface PerpSignalQuality {
   priorShortChangePct: number | null;
   /** 觸發前 priorLongBars 根的漲跌幅；歷史不足時為 null。 */
   priorLongChangePct: number | null;
+  /** 當根收盤價位於當根高低點區間的位置比例（0 ~ 1），越高代表多頭收盤越紮實。 */
+  closeStrength: number;
+  /** 是否通過自動開倉的高勝率風控門檻（排除空頭深水區反彈、過度追高與長上影線）。 */
+  autoTradeEligible: boolean;
 }
 
 function priorChangePct(candles: Candle[], index: number, bars: number) {
@@ -55,7 +64,11 @@ function priorChangePct(candles: Candle[], index: number, bars: number) {
  */
 export function classifyPerpSignal(candles: Candle[], signal: BigFishSignal): PerpSignalQuality {
   const index = candles.length - 1;
-  const close = candles[index]?.close ?? NaN;
+  const bar = candles[index];
+  const close = bar?.close ?? NaN;
+  const range = bar ? bar.high - bar.low : 0;
+  // 【詳細繁體中文註解】：計算當根 K 線收盤實體強度；若無振幅（high === low）視為 1，避免除以零。
+  const closeStrength = range > 0 && Number.isFinite(range) ? (close - bar.low) / range : 1;
   const { direction } = bigFishSupertrend(candles);
   let priorRedBars = 0;
   for (let cursor = index - 1; cursor >= 0 && direction[cursor] === 1; cursor--) priorRedBars++;
@@ -65,16 +78,33 @@ export function classifyPerpSignal(candles: Candle[], signal: BigFishSignal): Pe
   const supertrendDistancePct = (close / signal.supertrend - 1) * 100;
   const priorShortChangePct = priorChangePct(candles, index, rules.priorShortBars);
   const priorLongChangePct = priorChangePct(candles, index, rules.priorLongBars);
-  const best = signal.trendLong && priorRedBars >= rules.minimumPriorRedBars &&
-    emaDistancePct >= rules.minimumEmaDistancePct && emaDistancePct <= rules.maximumEmaDistancePct &&
-    supertrendDistancePct >= 0 && supertrendDistancePct <= rules.maximumSupertrendDistancePct &&
-    priorShortChangePct !== null && priorShortChangePct >= rules.minimumPriorShortChangePct &&
-    priorShortChangePct <= rules.maximumPriorShortChangePct &&
+
+  // 【詳細繁體中文註解】：自動交易高勝率把關條件（autoTradeEligible）
+  // 雖保留 TREND_FLIP 的 Slack 觀察通知，但自動下單額外要求：
+  // 1. 收盤不可低於 EMA200 超過 5%（過濾空頭趨勢深水區的死貓跳假翻綠）
+  // 2. 距 Supertrend 防守線不可超過 12%（過濾爆拉末端追高，避免停損過寬）
+  // 3. 收盤實體位於當根振幅 55% 以上（過濾長上影線出貨假突破）
+  // 4. 觸發前短週期未出現暴漲過熱或急殺落刀
+  const shortWindowHealthy = priorShortChangePct === null || (
+    priorShortChangePct >= rules.minimumPriorShortChangePct &&
+    priorShortChangePct <= rules.maximumPriorShortChangePct
+  );
+  const autoTradeEligible = signal.trendLong &&
+    emaDistancePct >= rules.minimumEmaDistancePct &&
+    supertrendDistancePct >= 0 &&
+    supertrendDistancePct <= rules.maximumSupertrendDistancePct &&
+    closeStrength >= rules.minimumCloseStrength &&
+    shortWindowHealthy;
+
+  const best = autoTradeEligible && priorRedBars >= rules.minimumPriorRedBars &&
+    emaDistancePct <= rules.maximumEmaDistancePct &&
+    priorShortChangePct !== null &&
     priorLongChangePct !== null && priorLongChangePct >= rules.minimumPriorLongChangePct &&
     priorLongChangePct <= rules.maximumPriorLongChangePct;
 
   return {
     grade: best ? 'BEST' : signal.trendLong ? 'TREND_FLIP' : 'EARLY_MACD',
     priorRedBars, emaDistancePct, supertrendDistancePct, priorShortChangePct, priorLongChangePct,
+    closeStrength, autoTradeEligible,
   };
 }

@@ -479,80 +479,8 @@ export const evaluateVolumeNoPriceRise = async (symbol: string): Promise<{
   }
 };
 
-/**
- * 【詳細繁體中文註解】：評估虛擬幣雙向趨勢策略 (Long/Short) - V2 短線強化版
- * 結合 Supertrend 趨勢、MACD 動能共振與 RSI 強弱分水嶺，提升短線勝率。
- */
-export const evaluateCryptoStrategy = async (symbol: string, interval: string = '4h'): Promise<{ 
-  signal: 'LONG' | 'SHORT' | 'HOLD'; 
-  reason: string; 
-  price: number;
-  indicators: any;
-}> => {
-  try {
-    const { data } = await fetchStockData(symbol, 200, interval);
-    if (data.length < 50) return { signal: 'HOLD', reason: "資料量不足", price: 0, indicators: {} };
-
-    const current = data[data.length - 1];
-    const prev = data[data.length - 2];
-    const price = current.close;
-
-    // 取得基礎指標
-    const prices = data.map(d => d.close);
-    
-    // 1. Supertrend (趨勢方向)
-    const { dir } = calculateSupertrend(data, 3.0, 10);
-    const currDir = dir[dir.length - 1];
-    const prevDir = dir[dir.length - 2];
-
-    // 2. MACD (動能指標)
-    const macd = calculateMACD(prices);
-    const currHist = macd.hist[macd.hist.length - 1];
-    const prevHist = macd.hist[macd.hist.length - 2];
-    const currMacd = macd.dif[macd.dif.length - 1];
-    const currSignal = macd.macd[macd.macd.length - 1];
-
-    // 3. RSI (強弱力量)
-    const rsiList = calculateRSI(prices, 14);
-    const currRsi = rsiList[rsiList.length - 1];
-
-    const indicators = {
-      price,
-      rsi: currRsi?.toFixed(2),
-      macdHist: currHist?.toFixed(4),
-      trend: currDir === -1 ? 'UP' : 'DOWN',
-      macdCross: currMacd > currSignal ? 'GOLDEN' : 'DEATH'
-    };
-
-    // --- 【進場策略 V2】 ---
-
-    // A. 做多策略 (LONG)
-    if (currDir === -1 && prevDir === 1 && currRsi > 45) {
-      return { signal: 'LONG', reason: "【趨勢反轉】Supertrend 翻綠 + RSI 進入強勢區，多頭動能啟動", price, indicators };
-    }
-    if (currDir === -1 && currMacd > currSignal && prevHist < 0 && currHist > 0 && currRsi > 50) {
-      return { signal: 'LONG', reason: "【多頭加倉】趨勢向上且 MACD 零軸上方二次金叉，強勢行情預期", price, indicators };
-    }
-    if (currRsi < 15 && currHist > prevHist) {
-      return { signal: 'LONG', reason: "【超跌抄底】RSI 極度超賣且空頭動能萎縮，預期強烈反彈", price, indicators };
-    }
-
-    // B. 做空策略 (SHORT)
-    if (currDir === 1 && prevDir === -1 && currRsi < 55) {
-      return { signal: 'SHORT', reason: "【趨勢反轉】Supertrend 翻紅 + RSI 轉弱，空頭勢力介入", price, indicators };
-    }
-    if (currDir === 1 && currMacd < currSignal && prevHist > 0 && currHist < 0 && currRsi < 45) {
-      return { signal: 'SHORT', reason: "【空頭加速】趨勢向上且 MACD 跌破訊號線，跌勢可能擴大", price, indicators };
-    }
-    if (currRsi > 85 && currHist < prevHist) {
-      return { signal: 'SHORT', reason: "【超買見頂】RSI 極度過熱且多頭動能衰退，預期出現大幅回調", price, indicators };
-    }
-
-    return { signal: 'HOLD', reason: "目前訊號不明確，建議觀望等待共振點", price, indicators };
-  } catch (error) {
-    return { signal: 'HOLD', reason: "系統評估異常", price: 0, indicators: {} };
-  }
-};
+/** 虛擬幣 4H 雙向趨勢掃描已獨立為專用模組，此處保留 re-export 以維持向下相容。 */
+export { evaluateCryptoStrategy, evaluateCryptoTrendFromData } from './cryptoTrendScanService';
 
 export const evaluateTrendMomentumData = (
   data: StockDataPoint[]

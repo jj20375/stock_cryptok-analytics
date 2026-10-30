@@ -117,6 +117,12 @@ type Pages = {
   "/potential-radar": {
     params: {};
   };
+  "/meme-desk": {
+    params: {};
+  };
+  "/api/meme-desk": {
+    params: {};
+  };
   "/us-stock-radar": {
     params: {};
   };
@@ -146,7 +152,7 @@ type Pages = {
 type RouteFiles = {
   "root.tsx": {
     id: "root";
-    page: "/" | "/dashboard" | "/strategy-dashboard" | "/api/strategy-dashboard" | "/trade-journal" | "/stock-analysis" | "/stock-themes" | "/api/macro" | "/api/top50" | "/api/stock/*" | "/api/gemini" | "/api/logout" | "/api/test-telegram" | "/api/test-slack" | "/api/test-strategy" | "/api/test-crypto" | "/api/portfolio" | "/api/analyze-stock" | "/api/stock-brief" | "/api/run-report" | "/api/backtest" | "/backtest" | "/crypto-futures" | "/api/crypto-futures" | "/api/futures-automation" | "/bitget-stock-perps" | "/api/warroom" | "/api/freqtrade/sync" | "/api/freqtrade/research" | "/api/potential-radar/chart" | "/api/webhook/tradingview/:secret" | "/warroom" | "/wave-radar" | "/potential-radar" | "/us-stock-radar" | "/tw-stock-radar" | "/tw-daytrade" | "/tradingview-signals" | "/login" | "/register" | "/portfolio" | "/settings";
+    page: "/" | "/dashboard" | "/strategy-dashboard" | "/api/strategy-dashboard" | "/trade-journal" | "/stock-analysis" | "/stock-themes" | "/api/macro" | "/api/top50" | "/api/stock/*" | "/api/gemini" | "/api/logout" | "/api/test-telegram" | "/api/test-slack" | "/api/test-strategy" | "/api/test-crypto" | "/api/portfolio" | "/api/analyze-stock" | "/api/stock-brief" | "/api/run-report" | "/api/backtest" | "/backtest" | "/crypto-futures" | "/api/crypto-futures" | "/api/futures-automation" | "/bitget-stock-perps" | "/api/warroom" | "/api/freqtrade/sync" | "/api/freqtrade/research" | "/api/potential-radar/chart" | "/api/webhook/tradingview/:secret" | "/warroom" | "/wave-radar" | "/potential-radar" | "/meme-desk" | "/api/meme-desk" | "/us-stock-radar" | "/tw-stock-radar" | "/tw-daytrade" | "/tradingview-signals" | "/login" | "/register" | "/portfolio" | "/settings";
   };
   "routes/home.tsx": {
     id: "routes/home";
@@ -284,6 +290,14 @@ type RouteFiles = {
     id: "routes/potential-radar";
     page: "/potential-radar";
   };
+  "routes/meme-desk.tsx": {
+    id: "routes/meme-desk";
+    page: "/meme-desk";
+  };
+  "routes/api.meme-desk.ts": {
+    id: "routes/api.meme-desk";
+    page: "/api/meme-desk";
+  };
   "routes/us-stock-radar.tsx": {
     id: "routes/us-stock-radar";
     page: "/us-stock-radar";
@@ -354,6 +368,8 @@ type RouteModules = {
   "routes/warroom": typeof import("./app/routes/warroom.tsx");
   "routes/wave-radar": typeof import("./app/routes/wave-radar.tsx");
   "routes/potential-radar": typeof import("./app/routes/potential-radar.tsx");
+  "routes/meme-desk": typeof import("./app/routes/meme-desk.tsx");
+  "routes/api.meme-desk": typeof import("./app/routes/api.meme-desk.ts");
   "routes/us-stock-radar": typeof import("./app/routes/us-stock-radar.tsx");
   "routes/tw-stock-radar": typeof import("./app/routes/tw-stock-radar.tsx");
   "routes/tw-daytrade": typeof import("./app/routes/tw-daytrade.tsx");

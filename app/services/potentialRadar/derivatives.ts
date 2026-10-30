@@ -174,3 +174,90 @@ export async function fetchGateDerivativeSignal(symbol: string, priceChange1hPct
     return unavailable(checkedAt, 'Gate 永續資料格式異常，已保留原現貨候選');
   }
 }
+
+/**
+ * 【詳細繁體中文註解】：衍生品籌碼交易把關結果
+ * - allowTrade: 是否允許順勢進場或推播一般候選（若多頭擁擠或空方大舉建倉則否決做多）
+ * - scoreAdjustment: 對潛力幣綜合評分的加減分調整（-20 ~ +15）
+ * - reason: 繁體中文籌碼判定理由
+ */
+export interface DerivativeTradeFilterResult {
+  allowTrade: boolean;
+  scoreAdjustment: number;
+  reason: string;
+}
+
+/**
+ * 【詳細繁體中文註解】：根據 Gate USDT 永續籌碼狀態（OI 變化、資金費率百分位、大戶多空比）評估多空進場可行性。
+ * 若永續資料未取得（UNAVAILABLE），採取預設放行（Fail-Open），避免外部統計 API 暫時異常時阻斷整個系統。
+ */
+export function evaluateDerivativeTradeFilter(
+  signal: DerivativeSignal | null | undefined,
+  side: 'LONG' | 'SHORT' = 'LONG',
+): DerivativeTradeFilterResult {
+  if (!signal || signal.status === 'UNAVAILABLE') {
+    return { allowTrade: true, scoreAdjustment: 0, reason: '永續籌碼未取得，維持原量價判斷' };
+  }
+  if (side === 'LONG') {
+    if (signal.status === 'CROWDED_LONG') {
+      return {
+        allowTrade: false,
+        scoreAdjustment: -20,
+        reason: '永續籌碼多頭擁擠（資金費率與大戶多空比同步過熱），阻擋追高做多',
+      };
+    }
+    if (signal.status === 'NEW_SHORTS') {
+      return {
+        allowTrade: false,
+        scoreAdjustment: -15,
+        reason: '永續籌碼出現新增空單（價格下跌且 OI 增加），阻擋逆勢做多',
+      };
+    }
+    if (signal.status === 'HEALTHY_TREND') {
+      return {
+        allowTrade: true,
+        scoreAdjustment: 15,
+        reason: '永續籌碼健康趨勢（價漲且 OI 同步放大、費率未過熱）',
+      };
+    }
+    if (signal.status === 'SHORT_SQUEEZE') {
+      return {
+        allowTrade: true,
+        scoreAdjustment: 5,
+        reason: '永續籌碼軋空上漲（空單停損回補推升）',
+      };
+    }
+    if (signal.status === 'DELEVERAGING') {
+      return {
+        allowTrade: true,
+        scoreAdjustment: -5,
+        reason: '市場正在去槓桿（價跌且 OI 下降），動能偏弱',
+      };
+    }
+    return { allowTrade: true, scoreAdjustment: 0, reason: '永續籌碼中性' };
+  }
+
+  // 做空 (SHORT) 方向籌碼把關
+  if (signal.status === 'HEALTHY_TREND' || signal.status === 'SHORT_SQUEEZE') {
+    return {
+      allowTrade: false,
+      scoreAdjustment: -15,
+      reason: '永續籌碼處於健康多頭或軋空階段，阻擋逆勢摸頭做空',
+    };
+  }
+  if (signal.status === 'NEW_SHORTS') {
+    return {
+      allowTrade: true,
+      scoreAdjustment: 15,
+      reason: '永續籌碼空方主動增倉（價跌且 OI 增加），順勢做空確認',
+    };
+  }
+  if (signal.status === 'CROWDED_LONG') {
+    return {
+      allowTrade: true,
+      scoreAdjustment: 10,
+      reason: '永續多頭槓桿過度擁擠，具備多殺多去槓桿回調潛力',
+    };
+  }
+  return { allowTrade: true, scoreAdjustment: 0, reason: '永續籌碼中性' };
+}

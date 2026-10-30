@@ -3,7 +3,7 @@
  * 面板資料由 /api/strategy-dashboard 唯讀取得；本頁不提供下單、不觸發推播或任何交易。
  */
 import { useEffect, useState } from 'react';
-import { redirect, type LoaderFunctionArgs } from 'react-router';
+import { Link, redirect, type LoaderFunctionArgs } from 'react-router';
 import { AppLayout } from '../components/AppLayout';
 import { MARKET_LABELS } from '../features/strategyDashboard/format';
 import { MarketPanel } from '../features/strategyDashboard/MarketPanel';
@@ -47,10 +47,18 @@ export default function StrategyDashboardPage() {
   };
 
   return <AppLayout><div className="mx-auto max-w-7xl space-y-5 p-4 md:p-8">
-    <header>
-      <p className="mb-2 text-xs tracking-widest opacity-60">STRATEGY DASHBOARD</p>
-      <h1 className="text-3xl font-bold">即時戰略 Dashboard</h1>
-      <p className="mt-2 text-sm opacity-75">依市場切換：上方看大盤環境，下方列出既有雷達挑出的候選標的、進場區間與停損參考。</p>
+    <header className="flex flex-wrap items-start justify-between gap-4">
+      <div>
+        <p className="mb-2 text-xs tracking-widest opacity-60">STRATEGY DASHBOARD</p>
+        <h1 className="text-3xl font-bold">即時戰略 Dashboard</h1>
+        <p className="mt-2 text-sm opacity-75">依市場切換：上方看大盤環境，下方列出既有雷達挑出的候選標的、進場區間與停損參考。</p>
+      </div>
+      <Link
+        to="/meme-desk"
+        className="rounded-lg border border-black/20 bg-white/80 px-4 py-2 text-xs font-semibold hover:bg-black/5"
+      >
+        🛡️ Solana 14 關防 Rug 戰情室 →
+      </Link>
     </header>
     <nav role="tablist" aria-label="市場面板" className="flex gap-2">
       {DASHBOARD_MARKETS.map(item => <button key={item} type="button" role="tab" aria-selected={market === item}

@@ -81,3 +81,48 @@ export function summarizePotentialPerformance(observations: RadarObservation[]):
     };
   });
 }
+
+export interface RadarWinRateGateResult {
+  groupKey: PerformanceGroupKey;
+  status: 'HEALTHY' | 'LOW_WIN_RATE' | 'INSUFFICIENT_SAMPLE';
+  allowed: boolean;
+  reason: string;
+}
+
+/**
+ * 【詳細繁體中文註解】：潛力雷達分組勝率動態閘門
+ * - 當特定訊號分組累積足夠成熟樣本（預設 `minSample = 10`）後，
+ *   若其 `1R 達標率 < 45%` 或 `72 小時平均報酬 < 0%`，判定為 `LOW_WIN_RATE`（`allowed: false`），
+ *   供呼叫端將該分組降級為純觀察、停止實盤推薦，形成數據閉環。
+ */
+export function evaluateRadarWinRateGate(
+  groups: PerformanceGroup[],
+  groupKey: PerformanceGroupKey,
+  minSample = 10
+): RadarWinRateGateResult {
+  const group = groups.find(item => item.key === groupKey);
+  if (!group || group.oneREligibleCount < minSample) {
+    return {
+      groupKey,
+      status: 'INSUFFICIENT_SAMPLE',
+      allowed: true,
+      reason: '成熟樣本數不足，暫不關閉該分組訊號',
+    };
+  }
+  const oneRHitRate = group.oneRHitRate ?? 0;
+  const h72Negative = group.h72.count >= minSample && (group.h72.average ?? 0) < 0;
+  if (oneRHitRate < 45 || h72Negative) {
+    return {
+      groupKey,
+      status: 'LOW_WIN_RATE',
+      allowed: false,
+      reason: `分組「${group.label}」1R 達標率 ${oneRHitRate.toFixed(1)}% 或 72h 平均報酬為負，建議降級為純觀察`,
+    };
+  }
+  return {
+    groupKey,
+    status: 'HEALTHY',
+    allowed: true,
+    reason: `分組「${group.label}」1R 達標率 ${oneRHitRate.toFixed(1)}%，勝率與期望報酬達標`,
+  };
+}

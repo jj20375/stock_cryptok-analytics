@@ -19,6 +19,7 @@ import { calculateRiskBasedPosition } from "./positionSizing";
 import { evaluateCapitalRisk } from "./riskGuard";
 import { getMacroIndicators } from "./macroService";
 import { getTWStockChips } from "./chipService";
+import { resolveStockThemes, formatThemeBadge, summarizeThemeDistribution } from "./stockThemes/profileService.server";
 
 // 【詳細繁體中文註解】：定義支援的幣種及其數量精確度（Decimals，經 Binance stepSize 實測換算）
 const SYMBOL_PRECISION: Record<string, number> = {
@@ -37,6 +38,9 @@ const SYMBOL_PRECISION: Record<string, number> = {
 
 const SYMBOLS = Object.keys(SYMBOL_PRECISION);
 
+/** 記錄各交易對與方向最近一次已發送 Slack 通知的 4H 已收盤 K 線時間戳，防止同根 K 線內重複推播 */
+const lastNotifiedCryptoTrendBar = new Map<string, number>();
+
 const truncateText = (text: string, maxLength = 120) => {
   if (!text) return "";
   return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text;
@@ -50,6 +54,7 @@ type DailyModeCandidate = {
   score: number;
   reason: string;
   trend: "up" | "down";
+  themeBadge?: string;
 };
 
 const DAILY_MODE_META: Record<DailyStrategyMode, {
@@ -88,7 +93,8 @@ const formatTopCandidates = (candidates: DailyModeCandidate[], emptyText: string
 
   return candidates.slice(0, 5).map((candidate, index) => {
     const trendLabel = candidate.trend === "up" ? "偏多" : "偏空";
-    return `> ${index + 1}. *${candidate.name}* (${candidate.symbol}) ｜ 分數 *${candidate.score}* ｜ ${trendLabel}\n>   └ ${candidate.reason}`;
+    const badge = candidate.themeBadge ? ` ${candidate.themeBadge}` : "";
+    return `> ${index + 1}. *${candidate.name}* (${candidate.symbol}) ｜ 分數 *${candidate.score}* ｜ ${trendLabel}${badge}\n>   └ ${candidate.reason}`;
   }).join("\n");
 };
 
@@ -114,12 +120,13 @@ ${JSON.stringify(candidates.slice(0, 5).map(item => ({
   symbol: item.symbol,
   name: item.name,
   score: item.score,
+  industryAndTheme: item.themeBadge || "未分類",
   reason: item.reason,
 })), null, 2)}
 
 請用繁體中文輸出 2 句短評：
-1. 第一句總結這批標的最核心的共同特徵。
-2. 第二句說明最值得追蹤的確認條件或風險。
+1. 第一句總結這批標的所屬的產業族群，以及是否搭上 AI 或特定市場趨勢。
+2. 第二句說明最值得追蹤的確認條件或技術風險。
 字數控制在 120 字內，不要使用條列。
 `;
 
@@ -160,7 +167,7 @@ const scanDailyModes = async (symbols: any[], market: "TW" | "US") => {
         if (chips) {
           const fBuyK = Math.round(chips.foreignBuySell / 1000); // 換算成張數 (1張=1000股)
           const tBuyK = Math.round(chips.trustBuySell / 1000);
-          
+
           if (chips.trustBuySell > 0 && chips.foreignBuySell > 0) {
             chipScoreAdj += 15;
             chipAddonReason = `【土洋共識】外資+${fBuyK}張、投信+${tBuyK}張`;
@@ -503,7 +510,7 @@ export const runStrategyEngine = async (env: any) => {
     console.log("🔍 [Crypto AI Scan] 開始掃描主流幣趨勢...");
     // 【詳細繁體中文註解】：擴展後的監控清單，包含 ADA, ZEC, SUI, ASTR
     const cryptoSymbols = [
-      'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 
+      'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT',
       'ADAUSDT', 'ZECUSDT', 'SUIUSDT', 'ASTRUSDT'
     ];
     const slackToken = env.SLACK_API_TOKEN || process.env.SLACK_API_TOKEN;
@@ -511,9 +518,14 @@ export const runStrategyEngine = async (env: any) => {
 
     for (const symbol of cryptoSymbols) {
       const analysis = await evaluateCryptoStrategy(symbol, '4h');
-      
-      // 只有當出現明確訊號 (LONG/SHORT) 時才發送
+      const barTime = Number(analysis.indicators?.barTime ?? 0);
+      const dedupeKey = `${symbol}:${analysis.signal}`;
+
+      // 只有當出現明確訊號 (LONG/SHORT) 且該根已收盤 4H K 線尚未通知過時才發送，防止同根 4H 週期重複推播
       if (analysis.signal !== 'HOLD' && slackToken && slackChannel) {
+        if (barTime > 0 && lastNotifiedCryptoTrendBar.get(dedupeKey) === barTime) {
+          continue;
+        }
         const signalColor = analysis.signal === 'LONG' ? '🟢 [做多 Long]' : '🔴 [做空 Short]';
         const prompt = `
           你是一位專業的虛擬幣交易大師。目前 ${symbol} 在 4 小時線出現了 ${analysis.signal} 訊號。
@@ -532,7 +544,7 @@ export const runStrategyEngine = async (env: any) => {
         `;
 
         const aiAdvice = await getAIResponse(prompt, {}, env);
-        
+
         const slackMsg = `*${signalColor} 虛擬幣 AI 趨勢預警*\n\n` +
           `💰 商品：*${symbol}*\n` +
           `📈 訊號：*${analysis.signal}*\n` +
@@ -542,6 +554,9 @@ export const runStrategyEngine = async (env: any) => {
           `_⚠️ 虛擬幣波動大，請務必嚴格執行止損。_`;
 
         await sendSlackMessage(slackToken, slackChannel, slackMsg);
+        if (barTime > 0) {
+          lastNotifiedCryptoTrendBar.set(dedupeKey, barTime);
+        }
         console.log(`✅ [Crypto AI Scan] 已發送 ${symbol} 訊號至 Slack`);
       }
     }
@@ -560,7 +575,7 @@ export const fetchUSMarketMovers = async (): Promise<any[]> => {
       "https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?formatted=false&scrIds=most_actives",
       "https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?formatted=false&scrIds=day_gainers"
     ];
-    
+
     let allSymbols: any[] = [];
     for (const url of urls) {
       const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
@@ -605,7 +620,7 @@ export const runStockDailyStrategy = async (env: any, market: "TW" | "US" = "TW"
 
   try {
     let symbols: any[] = [];
-    
+
     if (market === "TW") {
       const twseUrl = `https://www.twse.com.tw/exchangeReport/MI_INDEX?response=json&type=ALL&_=${Date.now()}`;
       const response = await fetch(twseUrl, { headers: { "User-Agent": "Mozilla/5.0" } });
@@ -616,7 +631,7 @@ export const runStockDailyStrategy = async (env: any, market: "TW" | "US" = "TW"
           const price = parseFloat(row[8]?.replace(/,/g, "") || "0");
           const changeDiff = parseFloat(row[10]?.replace(/,/g, "") || "0");
           const signStr = row[9] || "";
-          const sign = signStr.includes('plus') || signStr.includes('+') || signStr.includes('▲') ? 1 : 
+          const sign = signStr.includes('plus') || signStr.includes('+') || signStr.includes('▲') ? 1 :
                       (signStr.includes('minus') || signStr.includes('-') || signStr.includes('▼') ? -1 : 0);
           return {
             symbol: row[0] + ".TW",
@@ -636,9 +651,24 @@ export const runStockDailyStrategy = async (env: any, market: "TW" | "US" = "TW"
     const marketLabel = market === "TW" ? "台股" : "美股";
     const topGainers = [...symbols].sort((a, b) => b.changePercent - a.changePercent).slice(0, 5);
     const mostActive = [...symbols].sort((a, b) => b.volume - a.volume).slice(0, 5);
+
+    // 【詳細繁體中文註解】：解析熱門標的的產業別與 AI／趨勢題材標籤
+    const moverProfiles = await resolveStockThemes([...topGainers, ...mostActive], market, env);
+    const themeSummary = summarizeThemeDistribution([...moverProfiles.values()]);
+
+    const enrichedGainers = topGainers.map(s => ({
+      ...s,
+      themeBadge: formatThemeBadge(moverProfiles.get(s.symbol)),
+    }));
+    const enrichedActive = mostActive.map(s => ({
+      ...s,
+      themeBadge: formatThemeBadge(moverProfiles.get(s.symbol)),
+    }));
+
     let slackMsg = `*📅 ${marketLabel}${type === "market" ? "市場日報" : "AI 三模式策略日報"} (${dateStr})*\n`;
     let macroCard: UsDailyMacro | null = null;
     let strategyCardSections: UsDailyStrategySection[] = [];
+    let strategyThemeSummary = "";
 
     // 【詳細繁體中文註解】：引入全域總經債券參考風向球
     try {
@@ -666,20 +696,41 @@ export const runStockDailyStrategy = async (env: any, market: "TW" | "US" = "TW"
 
     if (type === "market") {
       slackMsg += `\n*1) 盤面概覽*\n`;
-      slackMsg += `> 漲幅領先：*${topGainers[0]?.name || "N/A"}* (${topGainers[0]?.symbol || "-"})\n`;
-      slackMsg += `> 交投活躍：*${mostActive[0]?.name || "N/A"}* (${mostActive[0]?.symbol || "-"})\n`;
+      slackMsg += `> 漲幅領先：*${enrichedGainers[0]?.name || "N/A"}* (${enrichedGainers[0]?.symbol || "-"}) ${enrichedGainers[0]?.themeBadge || ""}\n`;
+      slackMsg += `> 交投活躍：*${enrichedActive[0]?.name || "N/A"}* (${enrichedActive[0]?.symbol || "-"}) ${enrichedActive[0]?.themeBadge || ""}\n`;
+
+      if (themeSummary) {
+        slackMsg += `\n*🎯 產業與 AI 題材風向*\n> ${themeSummary}\n`;
+      }
 
       slackMsg += `\n*2) 漲幅領先 Top 5*\n`;
-      topGainers.forEach((s, i) => 
-        slackMsg += `> ${i+1}. *${s.name}* (${s.symbol})  漲幅: *+${s.changePercent}%*\n`
+      enrichedGainers.forEach((s, i) =>
+        slackMsg += `> ${i+1}. *${s.name}* (${s.symbol})  漲幅: *+${s.changePercent}%* ${s.themeBadge}\n`
       );
 
       slackMsg += `\n*3) 交投活躍 Top 5*\n`;
-      mostActive.forEach((s, i) => 
-        slackMsg += `> ${i+1}. *${s.name}* (${s.symbol})  量: ${s.volume.toLocaleString()}\n`
+      enrichedActive.forEach((s, i) =>
+        slackMsg += `> ${i+1}. *${s.name}* (${s.symbol})  量: ${s.volume.toLocaleString()} ${s.themeBadge}\n`
       );
     } else {
       const modeBuckets = await scanDailyModes(symbols, market);
+
+      // 【詳細繁體中文註解】：解析策略候選標的的產業與 AI／題材標籤
+      const allCandidates = [
+        ...modeBuckets.trend,
+        ...modeBuckets.consecutive_volume,
+        ...modeBuckets.volume_no_break,
+      ];
+      const strategyProfiles = await resolveStockThemes(allCandidates, market, env);
+      strategyThemeSummary = summarizeThemeDistribution([...strategyProfiles.values()]);
+
+      (Object.keys(modeBuckets) as DailyStrategyMode[]).forEach(mode => {
+        modeBuckets[mode] = modeBuckets[mode].map(c => ({
+          ...c,
+          themeBadge: formatThemeBadge(strategyProfiles.get(c.symbol)),
+        }));
+      });
+
       const trendInsight = await buildModeInsight(env, marketLabel, "trend", modeBuckets.trend);
       const consecutiveInsight = await buildModeInsight(env, marketLabel, "consecutive_volume", modeBuckets.consecutive_volume);
       const volumeNoBreakInsight = await buildModeInsight(env, marketLabel, "volume_no_break", modeBuckets.volume_no_break);
@@ -693,8 +744,12 @@ export const runStockDailyStrategy = async (env: any, market: "TW" | "US" = "TW"
       ];
 
       slackMsg += `\n*1) 盤面概覽*\n`;
-      slackMsg += `> 漲幅領先：*${topGainers[0]?.name || "N/A"}* (${topGainers[0]?.symbol || "-"})\n`;
-      slackMsg += `> 交投活躍：*${mostActive[0]?.name || "N/A"}* (${mostActive[0]?.symbol || "-"})\n`;
+      slackMsg += `> 漲幅領先：*${enrichedGainers[0]?.name || "N/A"}* (${enrichedGainers[0]?.symbol || "-"}) ${enrichedGainers[0]?.themeBadge || ""}\n`;
+      slackMsg += `> 交投活躍：*${enrichedActive[0]?.name || "N/A"}* (${enrichedActive[0]?.symbol || "-"}) ${enrichedActive[0]?.themeBadge || ""}\n`;
+
+      if (strategyThemeSummary) {
+        slackMsg += `\n*🎯 策略候選 AI 題材風向*\n> ${strategyThemeSummary}\n`;
+      }
 
       slackMsg += `\n*2) ${DAILY_MODE_META.trend.title}*\n`;
       slackMsg += `${formatTopCandidates(modeBuckets.trend, "暫無符合的趨勢型候選")}\n`;
@@ -717,7 +772,13 @@ export const runStockDailyStrategy = async (env: any, market: "TW" | "US" = "TW"
       if (market === "US") {
         /** 美股日報以 Block Kit 分區顯示；fallback text 保留手機推播摘要，發送目的地仍是原股票日報頻道。 */
         await sendSlackPost(slackToken, slackChannel, createUsStockDailyCard({
-          date: dateStr, type, topGainers, mostActive, macro: macroCard, strategySections: strategyCardSections,
+          date: dateStr,
+          type,
+          topGainers: enrichedGainers,
+          mostActive: enrichedActive,
+          macro: macroCard,
+          strategySections: strategyCardSections,
+          themeSummary: type === "market" ? themeSummary : strategyThemeSummary,
         }));
       } else {
         await sendSlackMessage(slackToken, slackChannel, slackMsg);

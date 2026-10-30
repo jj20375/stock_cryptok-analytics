@@ -102,7 +102,7 @@ export async function futuresSnapshot(env: CryptoFuturesTradingEnv, userId: numb
       quote = { quantity, notionalUsdt, marginUsdt: notionalUsdt / effectiveLeverage, stopLossPrice: sizing.stopLossPrice, targetPrice: sizing.targetPrice,
         riskUsdt: sizing.riskUsdt * quantity / sizing.quantity, liquidationPrice: 'error' in chosen ? null : chosen.liquidationPrice, leverage: effectiveLeverage, leverageCap: leverage,
         blockedReason: quantity < metadata.minQuantity || notionalUsdt < metadata.minNotional ? '風險倉位低於合約最小下單限制'
-          : 'error' in chosen ? chosen.error : (funds ? crossEntryCheck(funds, notionalUsdt, effectiveLeverage, sizing.riskUsdt * quantity / sizing.quantity, effectiveFeeRate, metadata.tiers) : null) || futuresLiquidityError(metadata, notionalUsdt) };
+          : 'error' in chosen ? chosen.error : (funds ? crossEntryCheck(funds, notionalUsdt, effectiveLeverage, sizing.riskUsdt * quantity / sizing.quantity, effectiveFeeRate, metadata.tiers) : null) || futuresLiquidityError(metadata, notionalUsdt, action.side) };
     }
   }
   return { symbol, strategyId, strategyName: strategy.name, strategyParams: strategy.defaultParams, state: strategyId === 'futures_big_fish' ? { phase: ctx.indicators.bigFish().direction[ctx.index] === -1 ? 'UP' as const : 'DOWN' as const, atr: ctx.indicators.atr(10)[ctx.index], adx: NaN, reason: '1H 吃大魚 Pine 條件・僅做多・無4H進場濾網' } : futuresRegime(ctx), action, position, quote, quoteError,

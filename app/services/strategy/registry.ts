@@ -20,6 +20,7 @@ import dailyVolumeSpike from './strategies/dailyVolumeSpike';
 import cryptoWave from './strategies/cryptoWave';
 import cryptoMomentumBurst from './strategies/cryptoMomentumBurst';
 import bigFishTrend from './strategies/bigFishTrend';
+import bigFishPro from './strategies/bigFishPro';
 import extremeReversal from './strategies/extremeReversal';
 import volatilitySqueezeBreakout from './strategies/volatilitySqueezeBreakout';
 import rangeMeanReversion from './strategies/rangeMeanReversion';
@@ -41,6 +42,7 @@ const STRATEGY_MODULES: StrategyModule[] = [
   cryptoWave,
   cryptoMomentumBurst,
   bigFishTrend,
+  bigFishPro,
   extremeReversal,
   volatilitySqueezeBreakout,
   rangeMeanReversion,

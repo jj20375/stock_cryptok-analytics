@@ -33,9 +33,11 @@ const SCAN_STRATEGY_TO_BACKTEST_ID: Record<ScanStrategy, string> = {
   consecutive_volume: 'consecutive_volume_breakout',
   volume_no_break: 'volume_no_breakout_fade',
   daily_volume_spike: 'daily_volume_spike',
+  big_fish_pro: 'big_fish_pro',
 };
 
 const scanStrategyLabel = (strategy: ScanStrategy) => {
+  if (strategy === 'big_fish_pro') return '吃大魚 Pro · 勝利方程式';
   if (strategy === 'consecutive_volume') return '量能連續兩期放大';
   if (strategy === 'volume_no_break') return '量增但未突破前高';
   if (strategy === 'daily_volume_spike') return '日線量增 2 倍';
@@ -108,7 +110,7 @@ export function MarketHotPicks({
             <span className="text-[10px] uppercase tracking-widest text-[#E4E3E0] opacity-50 font-bold font-mono">
               選擇量化分析策略 (Strategy Mechanism)
             </span>
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-2">
               <button
                 type="button"
                 onClick={() => onScanStrategyChange('trend')}
@@ -125,6 +127,25 @@ export function MarketHotPicks({
                 </div>
                 <div className="text-[9px] opacity-50 mt-1 leading-normal">
                   結合 RSI、MACD 及 KD，篩選趨勢偏多且適度回調的標的。
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => onScanStrategyChange('big_fish_pro')}
+                className={cn(
+                  "text-left p-2.5 rounded-sm border text-[11px] transition-all relative active:scale-[0.98]",
+                  scanStrategy === 'big_fish_pro'
+                    ? "bg-emerald-500/10 border-emerald-500/50 text-emerald-400 font-bold"
+                    : "bg-black/40 border-white/5 text-[#E4E3E0]/70 hover:border-white/10"
+                )}
+              >
+                <div className="font-bold flex items-center gap-1">
+                  <TrendingUp size={12} className={cn(scanStrategy === 'big_fish_pro' ? "text-emerald-400" : "text-[#E4E3E0]/40")} />
+                  吃大魚 Pro · 勝利方程式
+                </div>
+                <div className="text-[9px] opacity-50 mt-1 leading-normal">
+                  過濾紅線假金叉，鎖定洗盤翻綠或綠線站穩 EMA200＋江恩目標。
                 </div>
               </button>
 
@@ -240,7 +261,7 @@ export function MarketHotPicks({
         <div className="grid grid-cols-1 xs:grid-cols-2 lg:grid-cols-5 gap-3 md:gap-4">
           {scanResults.slice(0, 10).map((res, idx) => {
             const isSelected = selectedStock.symbol === res.symbol;
-            // 掃描器的 4 種策略都只支援台股/美股回測(見 registry 定義),加密貨幣市場不顯示跳轉連結
+            // 原有 4 種掃描策略支援台股/美股回測；吃大魚 Pro 額外支援加密貨幣全市場回測
             const backtestStrategyId = SCAN_STRATEGY_TO_BACKTEST_ID[scanStrategy];
             const backtestHref = `/backtest?market=${market}&symbol=${encodeURIComponent(res.symbol)}&strategyId=${backtestStrategyId}`;
 
@@ -268,7 +289,7 @@ export function MarketHotPicks({
                   RANK #{idx + 1}
                 </span>
                 <div className="flex items-center gap-1.5">
-                  {market !== 'CRYPTO' && (
+                  {(market !== 'CRYPTO' || scanStrategy === 'big_fish_pro') && (
                     <Link
                       to={backtestHref}
                       onClick={(e) => e.stopPropagation()}

@@ -1,6 +1,6 @@
 /** @file 潛力幣候選的通知選擇與 Slack 內容；只處理已收盤的公開現貨觀察訊號。 */
 import { bigFishLabel } from './bigFish';
-import { DERIVATIVE_LABELS } from './derivatives';
+import { DERIVATIVE_LABELS, evaluateDerivativeTradeFilter } from './derivatives';
 import { FOUR_HOUR_MS, PHASE_LABELS, QUARTER_MS, RADAR_RULES, isTrendConfirmedCandidate, type RadarSignal, type RadarSnapshot } from './types';
 import { createCryptoSignalCard, serializeSlackCard } from '../slack/cryptoSignalCard';
 
@@ -27,6 +27,10 @@ export function selectPotentialNotice(next: RadarSnapshot, previous: RadarSnapsh
   const fresh = fish?.timeframe !== '4h' ||
     next.checkedAt - (fish.barTime + FOUR_HOUR_MS) <= RADAR_RULES.bigFishNoticeWindowMs;
   if (fish?.entry === true && !alreadyNotified && fresh) return { key: 'BIG_FISH' };
+  // 【詳細繁體中文註解】：一般候選推播前，若永續籌碼已確認為「多頭擁擠（CROWDED_LONG）」或「新增空單（NEW_SHORTS）」，
+  // 直接阻擋一般候選通知，避免在多頭極度擁擠或空方建倉時推播追高訊號。
+  const derivativeCheck = evaluateDerivativeTradeFilter(next.signal.derivatives, 'LONG');
+  if (!derivativeCheck.allowTrade) return null;
   return previous?.signal && isTrendConfirmedCandidate(previous.signal) ? null : { key: 'CANDIDATE' };
 }
 

@@ -25,7 +25,7 @@ export interface AIStrategy {
   riskWarning: string;
 }
 
-export type ScanStrategy = 'trend' | 'consecutive_volume' | 'volume_no_break' | 'daily_volume_spike';
+export type ScanStrategy = 'trend' | 'big_fish_pro' | 'consecutive_volume' | 'volume_no_break' | 'daily_volume_spike';
 
 export interface IndicatorVisibility {
   ma5: boolean;

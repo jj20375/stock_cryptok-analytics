@@ -51,9 +51,9 @@ const supertrendMomentum: StrategyModule = {
     // 做空門檻:趨勢反轉需 RSI < 55(轉弱)、動能擴大需 RSI < 45
     rsiShortTrend: 55,
     rsiShortMomentum: 45,
-    // 極端值搶反彈/見頂門檻:15 / 85 為極端超賣/超買
-    rsiExtremeOversold: 15,
-    rsiExtremeOverbought: 85,
+    // 極端值搶反彈/見頂門檻:28 / 72 為 4H 波段真實可成交且搭配反轉 K 線確認的超賣/超買門檻
+    rsiExtremeOversold: 28,
+    rsiExtremeOverbought: 72,
     // 停損百分比:5 代表反向 5% 停損
     stopLossPct: 5,
   },
@@ -74,6 +74,7 @@ const supertrendMomentum: StrategyModule = {
     const { dir } = indicators.supertrend(params.stFactor, params.stPeriod);
     const macd = indicators.macd();
     const rsiList = indicators.rsi(params.rsiPeriod);
+    const ema50List = indicators.ema(50);
 
     const currDir = dir[index];
     const prevDir = dir[index - 1];
@@ -82,6 +83,8 @@ const supertrendMomentum: StrategyModule = {
     const currMacd = macd.dif[index];
     const currSignal = macd.macd[index];
     const currRsi = rsiList[index];
+    const current = candles[index];
+    const ema50 = ema50List[index] ?? current.close;
 
     if (currRsi == null) return { type: 'HOLD' };
 
@@ -96,48 +99,60 @@ const supertrendMomentum: StrategyModule = {
       return { type: 'HOLD' };
     }
 
-    // --- 空手:六組進場條件(與原 evaluateCryptoStrategy 一致) ---
+    // 計算前 20 根均量與當根收盤強度，排除縮量騙線與長反向影線
+    const volSlice = candles.slice(Math.max(0, index - 20), index);
+    const avgVol20 = volSlice.length > 0 ? volSlice.reduce((sum, b) => sum + b.volume, 0) / volSlice.length : current.volume;
+    const volumeRatio = avgVol20 > 0 ? current.volume / avgVol20 : 1;
+    const range = current.high - current.low;
+    const closeStrength = range > 0 ? (current.close - current.low) / range : 0.5;
+    const bearishCloseStrength = 1 - closeStrength;
 
-    // A1. 做多:Supertrend 翻多 + RSI 進入強勢區
-    if (currDir === -1 && prevDir === 1 && currRsi > params.rsiLongTrend) {
+    // --- 空手:六組進場條件(含均線、量能與 K 線實體確認) ---
+
+    // A1. 做多:Supertrend 翻多 + RSI 進入強勢區 + 站穩均線緩衝區 + 帶量收強
+    if (currDir === -1 && prevDir === 1 && currRsi > params.rsiLongTrend && currRsi < 75
+      && current.close >= ema50 * 0.98 && volumeRatio >= 1.1 && closeStrength >= 0.5) {
       return {
         type: 'ENTRY', side: 'LONG', stopLossPct: params.stopLossPct,
         reason: `【趨勢反轉】Supertrend 翻綠 + RSI ${currRsi.toFixed(2)} 進入強勢區,多頭動能啟動`,
       };
     }
-    // A2. 做多:多頭趨勢中 MACD 零軸上方二次金叉
-    if (currDir === -1 && currMacd > currSignal && prevHist < 0 && currHist > 0 && currRsi > params.rsiLongMomentum) {
+    // A2. 做多:多頭趨勢中 MACD 零軸上方二次金叉 + 位於均線之上
+    if (currDir === -1 && currMacd > currSignal && prevHist < 0 && currHist > 0
+      && currRsi > params.rsiLongMomentum && currRsi < 72 && current.close >= ema50 && volumeRatio >= 0.9) {
       return {
         type: 'ENTRY', side: 'LONG', stopLossPct: params.stopLossPct,
         reason: `【多頭加倉】趨勢向上且 MACD 零軸上方二次金叉,RSI ${currRsi.toFixed(2)}`,
       };
     }
-    // A3. 做多:極端超賣 + 空頭動能萎縮,搶反彈
-    if (currRsi < params.rsiExtremeOversold && currHist > prevHist) {
+    // A3. 做多:超賣 + 空頭動能萎縮 + 當根收紅止跌,搶反彈
+    if (currRsi <= params.rsiExtremeOversold && currHist > prevHist && current.close > current.open && closeStrength >= 0.55) {
       return {
         type: 'ENTRY', side: 'LONG', stopLossPct: params.stopLossPct,
-        reason: `【超跌抄底】RSI ${currRsi.toFixed(2)} 極度超賣且空頭動能萎縮,預期反彈`,
+        reason: `【超跌抄底】RSI ${currRsi.toFixed(2)} 超賣且空頭動能萎縮、收出止跌紅 K,預期反彈`,
       };
     }
-    // B1. 做空:Supertrend 翻空 + RSI 轉弱
-    if (currDir === 1 && prevDir === -1 && currRsi < params.rsiShortTrend) {
+    // B1. 做空:Supertrend 翻空 + RSI 轉弱 + 跌破均線緩衝區 + 帶量收弱
+    if (currDir === 1 && prevDir === -1 && currRsi < params.rsiShortTrend && currRsi > 25
+      && current.close <= ema50 * 1.02 && volumeRatio >= 1.1 && bearishCloseStrength >= 0.5) {
       return {
         type: 'ENTRY', side: 'SHORT', stopLossPct: params.stopLossPct,
         reason: `【趨勢反轉】Supertrend 翻紅 + RSI ${currRsi.toFixed(2)} 轉弱,空頭勢力介入`,
       };
     }
-    // B2. 做空:空頭趨勢中 MACD 跌破訊號線且柱狀圖轉負
-    if (currDir === 1 && currMacd < currSignal && prevHist > 0 && currHist < 0 && currRsi < params.rsiShortMomentum) {
+    // B2. 做空:空頭趨勢中 MACD 跌破訊號線且柱狀圖轉負 + 位於均線之下
+    if (currDir === 1 && currMacd < currSignal && prevHist > 0 && currHist < 0
+      && currRsi < params.rsiShortMomentum && currRsi > 28 && current.close <= ema50 && volumeRatio >= 0.9) {
       return {
         type: 'ENTRY', side: 'SHORT', stopLossPct: params.stopLossPct,
-        reason: `【空頭加速】MACD 跌破訊號線且動能轉負,RSI ${currRsi.toFixed(2)},跌勢可能擴大`,
+        reason: `【空頭加速】趨勢向下且 MACD 跌破訊號線、動能轉負,RSI ${currRsi.toFixed(2)},跌勢可能擴大`,
       };
     }
-    // B3. 做空:極端超買 + 多頭動能衰退,見頂回調
-    if (currRsi > params.rsiExtremeOverbought && currHist < prevHist) {
+    // B3. 做空:超買 + 多頭動能衰退 + 當根收黑轉弱,見頂回調
+    if (currRsi >= params.rsiExtremeOverbought && currHist < prevHist && current.close < current.open && bearishCloseStrength >= 0.55) {
       return {
         type: 'ENTRY', side: 'SHORT', stopLossPct: params.stopLossPct,
-        reason: `【超買見頂】RSI ${currRsi.toFixed(2)} 極度過熱且多頭動能衰退,預期回調`,
+        reason: `【超買見頂】RSI ${currRsi.toFixed(2)} 過熱且多頭動能衰退、收出轉弱黑 K,預期回調`,
       };
     }
 

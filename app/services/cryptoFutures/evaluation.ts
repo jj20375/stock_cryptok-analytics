@@ -33,13 +33,32 @@ export function buildFuturesEvaluation(candles: Candle[], strategy: StrategyModu
   const baseline = getStrategy('big_fish')!;
   const baselineResult = runBacktestEngine(candles, baseline, baseline.defaultParams, { ...config, captureEvents: false }, start);
   const leverageUsed = result.trades.flatMap(trade => trade.initialMargin ? [trade.entryPrice * trade.quantity / trade.initialMargin] : []);
+  const overallStats = stats(result);
+  const weakSides = sides.filter(s => s.totalTrades >= 5 && (s.expectancy < 0 || s.winRatePct < 35)).map(s => s.side);
+  const oosSegments = segments.slice(1).filter((seg): seg is Extract<typeof seg, { totalTrades: number }> => !('insufficient' in seg) && seg.totalTrades > 0);
+  const outOfSampleConsistent = oosSegments.length > 0 && oosSegments.every(seg => seg.expectancy >= 0);
+  /**
+   * 【詳細繁體中文註解】：合約多空與樣本外勝率診斷
+   * - 自動檢查 LONG / SHORT 是否有單邊期望值為負或勝率低於 35%，以及雙倍成本壓力測試與樣本外（驗證期／保留期）是否維持正期望值。
+   */
+  const winRateDiagnosis = {
+    overallWinRatePct: overallStats.winRatePct,
+    stressPositiveExpectancy: stats(stress).expectancy > 0,
+    outOfSampleConsistent,
+    weakSides,
+    recommendation: weakSides.length === 1
+      ? `${weakSides[0] === 'SHORT' ? '空方 (SHORT)' : '多方 (LONG)'} 樣本勝率或期望值偏弱，建議將交易方向改為僅做${weakSides[0] === 'SHORT' ? '多 (LONG)' : '空 (SHORT)'}以提升整體勝率`
+      : !outOfSampleConsistent && oosSegments.length > 0
+        ? '驗證期或保留期期望值轉負，建議維持觀察或收緊進場確認條件'
+        : '多空方向與樣本外期望值穩定',
+  };
   return { instrument, strategyName: strategy.name, strategyParams: { ...params }, backtestOnly: strategy.backtestOnly ?? false,
     direction, leverage: config.futures!.leverage, marginMode: 'ISOLATED',
     rulesVersion: FUTURES_RULES_VERSION, leveragePolicy: 'CAP', diagnostics: result.entryDiagnostics,
     leverageUsed: leverageUsed.length ? { min: Math.round(Math.min(...leverageUsed)), max: Math.round(Math.max(...leverageUsed)) } : null,
     tiersObservedAt: config.futures!.tiersObservedAt, markComplete, fundingComplete: true,
     liquidationModel: markComplete && config.futures!.tiers.length ? '目前級距＋標記價壓力估算，非歷史真實強平' : '資料不足，未驗證強平',
-    totalFundingPnl: stats(result).totalFundingPnl, stress: stats(stress), segments, sides,
+    totalFundingPnl: overallStats.totalFundingPnl, stress: stats(stress), segments, sides, winRateDiagnosis,
     baseline: { label: '原有吃大魚・相同合約行情與成本', ...stats(baselineResult), diagnostics: baselineResult.entryDiagnostics },
     events: result.events.slice(-5000), eventsTruncated: result.events.length > 5000,
     trades: result.trades, sampleSufficient: result.trades.length >= 30,

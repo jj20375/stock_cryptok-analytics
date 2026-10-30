@@ -277,7 +277,7 @@ async function processUserSignal(
           { feeRate: Math.max(signal.feeRate!, metadata.takerFeeRate ?? 0.0006), slippageBps: 10 }, risk.settings.capitalBaseUsdt,
           risk.settings.maxRiskPerTradePct, positionCapPct, rules.quantityPrecision, effectiveLeverage, signal.fundingBudgetRate);
         if ('error' in calculated) throw new Error(calculated.error);
-        const liquidityError = futuresLiquidityError(metadata, calculated.quantity * expectedEntryPrice);
+        const liquidityError = futuresLiquidityError(metadata, calculated.quantity * expectedEntryPrice, positionSide === 'long' ? 'LONG' : 'SHORT');
         if (liquidityError) throw new Error(liquidityError);
         /** 上限內選可容納結構停損的倍數，名目與停損不變；實際保證金仍需帳戶 API 驗證。 */
         const tier = metadata.tiers.find(t => calculated.quantity * expectedEntryPrice >= t.min && calculated.quantity * expectedEntryPrice <= t.max);
