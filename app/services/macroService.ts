@@ -1,3 +1,6 @@
+/** @file 羅盤報價抓取與各市場判讀組合；原油為補充觀察，不影響既有評分及交易風控。 */
+import { buildOilObservation } from "./macro/oil";
+import { buildMacroTimingWindow, buildNightSessionPillar } from "./macro/nightSessionAndTiming";
 import { calculateMA } from "./stockService";
 import type {
   MacroIndicators,
@@ -8,6 +11,7 @@ import type {
   MacroSignalDirection,
   MacroSourceKey,
   MacroTargetMarket,
+  MacroTimingWindow,
   MarketSpecificMacroView,
 } from "./macro/types";
 import {
@@ -29,6 +33,7 @@ export type {
   MacroSignalDirection,
   MacroSourceKey,
   MacroTargetMarket,
+  MacroTimingWindow,
   MarketSpecificMacroView,
 } from "./macro/types";
 
@@ -202,6 +207,10 @@ export function buildMarketSpecificView(
   const fxPillar = buildFxPillar(market, marketName, dxy, usdTwd);
   const futuresPillar = buildFuturesPillar(market, marketName, nq, es);
   const bondSpreadAndVixPillar = buildBondVixPillar(market, marketName, vix, yieldSpread10Y3M);
+  /** 油價尚未回測，僅提供台股／美股觀點，不併入下方四項權重、訊號計數與全域風控。 */
+  const oilPillar = market === "CRYPTO" ? undefined : buildOilObservation(params, market);
+  /** 台指夜盤與費半／台積電 ADR 連動卡片，不併入原有四項權重分數，專供夜盤與開盤跳空判斷。 */
+  const nightSessionPillar = buildNightSessionPillar(params, market);
 
   // ============================================================================
   // 5. 依市場權重計算「是否會漲」綜合分數與動態不矛盾總結
@@ -311,19 +320,25 @@ export function buildMarketSpecificView(
     summary += `（⚠️ ${unavailablePillars.map(shortName).join("、")}報價暫缺，未納入評分）`;
   }
 
+  if (oilPillar) summary += ` 油價觀察（不計分）：${oilPillar.signalLabel}。`;
+
+  const timingWindow = buildMacroTimingWindow(params, market, score);
+
   return {
     market,
     compassTitle:
       market === "US"
-        ? "🇺🇸 美股漲跌走勢羅盤 · 美債 / 美元 / 美股期貨 / 債券與 VIX"
+        ? "🇺🇸 美股漲跌走勢羅盤 · 美債 / 美元 / 美股期貨 / 債券與 VIX / 費半 / 油價"
         : market === "TW"
-        ? "🇹🇼 台股漲跌走勢羅盤 · 美債 / 新台幣匯率 / 期貨夜盤連動 / 恐慌利差"
+        ? "🇹🇼 台股漲跌走勢羅盤 · 美債 / 新台幣匯率 / 期貨與台指夜盤連動 / 恐慌利差 / 油價"
         : "🪙 幣圈宏觀走勢羅盤 · 美債 / 美元 DXY / 那指期貨連動 / 恐慌情緒",
     pillars: {
       treasury: treasuryPillar,
       fx: fxPillar,
       futures: futuresPillar,
       bondSpreadAndVix: bondSpreadAndVixPillar,
+      ...(nightSessionPillar ? { nightSession: nightSessionPillar } : {}),
+      ...(oilPillar ? { oil: oilPillar } : {}),
     },
     outlook: {
       direction,
@@ -338,6 +353,7 @@ export function buildMarketSpecificView(
       usMarketHint: actionHint,
       twMarketHint: actionHint,
     },
+    timingWindow,
   };
 }
 
@@ -378,7 +394,7 @@ export function buildMacroPillarsAndOutlook(params: MacroRawInput): {
  */
 export const getMacroIndicators = async (): Promise<MacroIndicators | null> => {
   try {
-    const [dxyData, us10yData, us5yData, us3mData, vixData, usdTwdData, nqData, esData] = await Promise.all([
+    const [dxyData, us10yData, us5yData, us3mData, vixData, usdTwdData, nqData, esData, wtiData, brentData, tsmData, soxData] = await Promise.all([
       fetchMacroTicker("DX-Y.NYB"), // 美元指數 (美元走強通常利空風險資產)
       fetchMacroTicker("^TNX"),     // 10年期美債殖利率 (全球無風險資產定價之錨)
       fetchMacroTicker("^FVX"),     // 5年期美債殖利率
@@ -387,6 +403,10 @@ export const getMacroIndicators = async (): Promise<MacroIndicators | null> => {
       fetchMacroTicker("TWD=X"),    // 美元兌新台幣匯率 (外資熱錢流向台股關鍵指標)
       fetchMacroTicker("NQ=F"),     // 那斯達克 100 期貨 (科技與 AI 股 24H 先行指標)
       fetchMacroTicker("ES=F"),     // 標普 500 期貨 (美股大盤 24H 先行指標)
+      fetchMacroTicker("CL=F"),     // WTI 原油近月期貨（美元／桶，僅作補充觀察）
+      fetchMacroTicker("BZ=F"),     // 布蘭特原油近月期貨（美元／桶，與 WTI 交叉確認）
+      fetchMacroTicker("TSM"),      // 台積電 ADR（台指夜盤與隔日台股權值最直接連動指標）
+      fetchMacroTicker("^SOX"),     // 費城半導體指數（美股 AI 晶片與台灣電子股先行指標）
     ]);
 
     if (!dxyData || !us10yData || !us3mData || !vixData) {
@@ -399,6 +419,10 @@ export const getMacroIndicators = async (): Promise<MacroIndicators | null> => {
     const usdTwdObj = toMacroQuote(usdTwdData);
     const nqObj = toMacroQuote(nqData, true);
     const esObj = toMacroQuote(esData, true);
+    /** 原油非核心來源，失敗保留 null，避免單項斷線使整個羅盤無法使用。 */
+    const oil = { wti: toMacroQuote(wtiData), brent: toMacroQuote(brentData) };
+    /** 台指夜盤與半導體先行來源（TSM / ^SOX），非核心來源失敗時保留 null */
+    const nightSession = { tsm: toMacroQuote(tsmData), sox: toMacroQuote(soxData) };
 
     // 5Y 只用於顯示與 10Y-5Y 利差，不參與多空評分；缺資料時沿用 10Y 讓版面不中斷，並在 dataStatus 標記缺漏
     const us5yLatest = us5yData?.latest || us10yData.latest;
@@ -414,7 +438,8 @@ export const getMacroIndicators = async (): Promise<MacroIndicators | null> => {
 
     const sourceData: Record<MacroSourceKey, { quoteTime: number } | null> = {
       dxy: dxyData, us10y: us10yData, us5y: us5yData, us3m: us3mData,
-      vix: vixData, usdTwd: usdTwdData, nq: nqData, es: esData,
+      vix: vixData, usdTwd: usdTwdData, nq: nqData, es: esData, wti: wtiData, brent: brentData,
+      tsm: tsmData, sox: soxData,
     };
     const dataStatus = {
       missing: (Object.keys(sourceData) as MacroSourceKey[]).filter((key) => !sourceData[key]),
@@ -466,6 +491,8 @@ export const getMacroIndicators = async (): Promise<MacroIndicators | null> => {
       vix: vixObj,
       nq: nqObj,
       es: esObj,
+      oil,
+      nightSession,
       yieldSpread10Y3M,
     });
 
@@ -482,6 +509,8 @@ export const getMacroIndicators = async (): Promise<MacroIndicators | null> => {
         trend: us3mTrend,
       },
       vix: vixObj,
+      oil,
+      nightSession,
       futures: {
         nq: nqObj,
         es: esObj,

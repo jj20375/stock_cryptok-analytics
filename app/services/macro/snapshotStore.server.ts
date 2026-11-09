@@ -35,6 +35,8 @@ function pickInputs(indicators: MacroIndicators) {
     vix: quote(indicators.vix),
     nq: quote(indicators.futures.nq),
     es: quote(indicators.futures.es),
+    /** 與原有 JSON 快照一起保留觀察依據，沿用既有寫入及節流，不新增資料表。 */
+    oil: { wti: quote(indicators.oil.wti), brent: quote(indicators.oil.brent) },
     yieldSpread10Y3M: indicators.spreads.yieldSpread10Y3M,
     quoteTimes: indicators.dataStatus.quoteTimes,
   };
@@ -49,6 +51,7 @@ function pickPillarSignals(indicators: MacroIndicators) {
       fx: pillars.fx.dataUnavailable ? 'UNAVAILABLE' : pillars.fx.signal,
       futures: pillars.futures.dataUnavailable ? 'UNAVAILABLE' : pillars.futures.signal,
       bondSpreadAndVix: pillars.bondSpreadAndVix.signal,
+      ...(pillars.oil ? { oil: pillars.oil.dataUnavailable ? 'UNAVAILABLE' : pillars.oil.signal } : {}),
     }];
   }));
 }

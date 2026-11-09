@@ -13,6 +13,7 @@ import { fetchRadarCandles, fetchRadarDepth, fetchRadarFourHourCandles, fetchUni
 import { FOUR_HOUR_MS, QUARTER_MS, RADAR_RULES, type MarketTicker, type RadarObservation,
   type RadarSnapshot } from '../potentialRadar/types';
 import { cryptoSnapshotToPick, cryptoWatchItem, explainEmpty, isCryptoPickable, rankPicks, rankWatchlist } from './picks';
+import { evaluateCryptoReversalPick } from './reversalPicks';
 import { DASHBOARD_RULES, type DashboardPanelData } from './types';
 import { cryptoTrackRecords, type BacktestSummary } from './validation';
 
@@ -130,8 +131,14 @@ export async function loadCryptoPanel(db: Db | null, backtests: Map<string, Back
   const analyzed = snapshots.filter(item => item.signal && !item.error);
   const trackFor = cryptoTrackRecords(observations);
   const context = { market: 'CRYPTO' as const, latestBarTime, backtests };
-  const picks = rankPicks(analyzed.filter(isCryptoPickable).map(item => cryptoSnapshotToPick(item, context, trackFor)));
-  const watchlist = rankWatchlist(analyzed.filter(item => !isCryptoPickable(item)).map(cryptoWatchItem));
+  const trendRanked = analyzed.filter(isCryptoPickable).map(item => cryptoSnapshotToPick(item, context, trackFor));
+  const reversalRanked = analyzed
+    .filter(item => !isCryptoPickable(item))
+    .map(item => evaluateCryptoReversalPick(item, context))
+    .filter((item): item is NonNullable<typeof item> => item !== null);
+  const pickedSymbols = new Set([...trendRanked, ...reversalRanked].map(item => item.pick.symbol));
+  const picks = rankPicks([...trendRanked, ...reversalRanked]);
+  const watchlist = rankWatchlist(analyzed.filter(item => !pickedSymbols.has(item.symbol)).map(cryptoWatchItem));
   const emptyReason = picks.length ? null : !snapshots.length
     ? (errors.length ? '虛擬幣行情無法取得，無法產生清單。' : '潛力幣雷達目前沒有可分析的資料。')
     : explainEmpty(analyzed.length, analyzed.map(item => item.signal!.phase));

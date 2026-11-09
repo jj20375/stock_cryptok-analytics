@@ -151,7 +151,8 @@ test('卡片呈現驗證標示與 K 線入口，免責提示固定出現，且�
     createElement(Disclaimer), createElement(PickCard, { pick, rank: 1, now: cutoff, onOpenChart: () => {} })));
   assert.match(html, /僅供參考，非投資建議/);
   assert.match(html, /未經回測驗證/);
-  assert.match(html, /停損參考/);
+  // 卡片停損標籤已改為依方向顯示；本測試標的為做多，應出現多單停損。
+  assert.match(html, /多單停損（結構失效價）/);
   assert.match(html, /查看 K 線/);
   assert.match(html, /非最新收盤段/);
   assert.doesNotMatch(html, /下單<\/button>|買進<\/button>|送出訂單/);

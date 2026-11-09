@@ -5,6 +5,7 @@ import { cn } from '../../../utils/cn';
 import { VelaChart } from './VelaChart';
 import { StrategyLayerPanel } from './StrategyLayerPanel';
 import { BigFishProGannPanel } from './BigFishProGannPanel';
+import { ReversalZonePanel } from './ReversalZonePanel';
 import { MarketQuoteCards } from './MarketQuoteCards';
 import { ChartRangePanel, CHART_TIMEFRAME_LABELS } from '../../../components/ChartRangePanel';
 import { MARKET_CHART_TIMEZONES } from '../../../utils/chartDate';
@@ -115,6 +116,12 @@ export function MainChartPanel({
       </div>
 
       <BigFishProGannPanel
+        symbol={selectedStock.symbol}
+        timeframe={timeframe}
+        data={allData}
+      />
+
+      <ReversalZonePanel
         symbol={selectedStock.symbol}
         timeframe={timeframe}
         data={allData}

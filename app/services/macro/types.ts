@@ -10,8 +10,8 @@
 export type MacroSignalDirection = "BULLISH" | "NEUTRAL" | "BEARISH";
 export type MacroTargetMarket = "US" | "TW" | "CRYPTO";
 
-/** 羅盤使用的外部報價來源代號；用於標記哪一項抓取失敗與報價時間 */
-export type MacroSourceKey = "dxy" | "us10y" | "us5y" | "us3m" | "vix" | "usdTwd" | "nq" | "es";
+/** 羅盤使用的外部報價來源代號；用於標記哪一項抓取失敗與報價時間（tsm 為台積電 ADR、sox 為費城半導體指數，用來模擬台指夜盤與科技股先行盤） */
+export type MacroSourceKey = "dxy" | "us10y" | "us5y" | "us3m" | "vix" | "usdTwd" | "nq" | "es" | "wti" | "brent" | "tsm" | "sox";
 
 /** 單一報價的日線摘要：最新值、前一根日K收盤、漲跌幅（%）、10 日均線與相對均線的方向 */
 export interface MacroQuote {
@@ -24,8 +24,8 @@ export interface MacroQuote {
 }
 
 export interface MacroPillarAnalysis {
-  /** 維度識別碼 */
-  key: "treasury" | "fx" | "futures" | "bondSpreadAndVix";
+  /** 維度識別碼（nightSession 為台指夜盤／費半與台積電 ADR 連動觀察） */
+  key: "treasury" | "fx" | "futures" | "bondSpreadAndVix" | "oil" | "nightSession";
   /** 維度顯示標題 */
   title: string;
   /** 對目標市場的影響方向：BULLISH (看漲利多) / NEUTRAL (中性震盪) / BEARISH (看跌利空) */
@@ -43,6 +43,25 @@ export interface MacroPillarAnalysis {
    * 此時 signal 固定為 NEUTRAL 且不計入評分，避免用假預設值產生看漲/看跌訊號。
    */
   dataUnavailable?: boolean;
+}
+
+/**
+ * 【詳細繁體中文註解】
+ * 跌勢與震盪盤中的「做空／做多切入時機」訊號結構：
+ * 結合 VIX 恐慌指數（位階、10MA 乖離與單日轉折）、美股期貨（NQ/ES 走盤）及台指夜盤連動指標（TSM 台積電 ADR / ^SOX 費半），
+ * 明確標示當前處於「順勢做空時機」「恐慌見底反轉做多時機」「順勢做多時機」或「多空拉鋸觀望」。
+ */
+export interface MacroTimingWindow {
+  /** 時機狀態：SHORT_WINDOW（破線/避險升溫做空時機）、REVERSAL_LONG_WINDOW（恐慌極值回落抄底做多時機）、TREND_LONG_WINDOW（順勢做多時機）、WAIT（觀望等待） */
+  stance: "SHORT_WINDOW" | "REVERSAL_LONG_WINDOW" | "TREND_LONG_WINDOW" | "WAIT";
+  /** 時機燈號短標題 */
+  badge: string;
+  /** 為何現在是做空或做多時機的判斷依據（VIX + 期貨走盤 + 台指夜盤 TSM/SOX 連動） */
+  triggerReason: string;
+  /** 做多觸發與確認清單（讓使用者清楚知道跌勢中出現什麼訊號可以開多） */
+  longChecklist: string[];
+  /** 做空觸發與確認清單（讓使用者清楚知道反彈到哪或破哪裡可以開空） */
+  shortChecklist: string[];
 }
 
 /**
@@ -78,15 +97,21 @@ export interface MarketSpecificMacroView {
   market: MacroTargetMarket;
   /** 羅盤頂部標題 */
   compassTitle: string;
-  /** 專屬四大維度卡片 */
+  /** 專屬四大維度卡片與夜盤／油價觀察 */
   pillars: {
     treasury: MacroPillarAnalysis;
     fx: MacroPillarAnalysis;
     futures: MacroPillarAnalysis;
     bondSpreadAndVix: MacroPillarAnalysis;
+    /** 台股／美股的油價補充觀察；不列入原四項評分與訊號計數，幣圈不提供。 */
+    oil?: MacroPillarAnalysis;
+    /** 台指夜盤與費半／台積電 ADR 連動觀察卡片（不改動原回測四項評分，專供判斷夜盤與開盤跳空） */
+    nightSession?: MacroPillarAnalysis;
   };
   /** 專屬市場漲跌總結 */
   outlook: MacroMarketOutlook;
+  /** 跌勢與震盪盤中的「做空／反轉做多／順勢做多」時機訊號 */
+  timingWindow?: MacroTimingWindow;
 }
 
 /** 報價完整度：哪些來源抓取失敗，以及每個來源最後一筆成交/報價的時間 */
@@ -111,6 +136,10 @@ export interface MacroIndicators {
   us5y: Omit<MacroQuote, "changePct">;
   us3m: Omit<MacroQuote, "changePct">;
   vix: MacroQuote;
+  /** 原油近月期貨（美元／桶）；任一來源失敗為 null，不影響其餘羅盤資料。 */
+  oil: { wti: MacroQuote | null; brent: MacroQuote | null };
+  /** 台指夜盤與美股科技先行指標：台積電 ADR (TSM) 與費城半導體指數 (^SOX) */
+  nightSession?: { tsm: MacroQuote | null; sox: MacroQuote | null };
   futures: {
     /** 那斯達克 100 期貨；抓取失敗時為 null（不再以 20000 假值代入） */
     nq: MacroQuote | null;
@@ -146,4 +175,8 @@ export type MacroRawInput = {
   nq: MacroQuote | null;
   es: MacroQuote | null;
   yieldSpread10Y3M: number;
+  /** 選填以相容既有回測輸入；省略時油價觀察標示資料暫缺，不改動評分。 */
+  oil?: { wti: MacroQuote | null; brent: MacroQuote | null };
+  /** 選填：台積電 ADR (TSM) 與費城半導體 (^SOX)，用於台指夜盤連動與多空時機判讀 */
+  nightSession?: { tsm: MacroQuote | null; sox: MacroQuote | null };
 };

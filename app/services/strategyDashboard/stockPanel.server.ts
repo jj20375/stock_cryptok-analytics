@@ -15,6 +15,7 @@ import { fetchUsStockCandles, fetchUsStockUniverse, selectUsStockCandidates } fr
 import { US_STOCK_FOUR_HOUR_MS, US_STOCK_RADAR_RULES, type UsStockCandle, type UsStockObservation,
   type UsStockSignal, type UsStockSnapshot, type UsStockTicker } from '../usStockRadar/types';
 import { explainEmpty, isStockPickable, rankPicks, rankWatchlist, stockSnapshotToPick, stockWatchItem } from './picks';
+import { evaluateStockReversalPick } from './reversalPicks';
 import { DASHBOARD_RULES, type DashboardPanelData } from './types';
 import { stockTrackRecords, type BacktestSummary } from './validation';
 
@@ -172,8 +173,14 @@ export async function loadStockPanel(adapter: StockAdapter, db: Db | null,
   const analyzed = snapshots.filter(item => item.signal && !item.error);
   const trackFor = stockTrackRecords(observations, adapter.benchmarkLabel);
   const context = { market: adapter.market, latestBarTime: latestBar?.openTime ?? dbLatestBarTime, backtests };
-  const picks = rankPicks(analyzed.filter(isStockPickable).map(item => stockSnapshotToPick(item, context, trackFor)));
-  const watchlist = rankWatchlist(analyzed.filter(item => !isStockPickable(item)).map(item => stockWatchItem(adapter.market, item)));
+  const trendRanked = analyzed.filter(isStockPickable).map(item => stockSnapshotToPick(item, context, trackFor));
+  const reversalRanked = analyzed
+    .filter(item => !isStockPickable(item))
+    .map(item => evaluateStockReversalPick(item, context))
+    .filter((item): item is NonNullable<typeof item> => item !== null);
+  const pickedSymbols = new Set([...trendRanked, ...reversalRanked].map(item => item.pick.symbol));
+  const picks = rankPicks([...trendRanked, ...reversalRanked]);
+  const watchlist = rankWatchlist(analyzed.filter(item => !pickedSymbols.has(item.symbol)).map(item => stockWatchItem(adapter.market, item)));
   const notTrendUp = analyzed.filter(item => !item.signal!.dailyTrendUp &&
     !['EXTENDED', 'EXCLUDED'].includes(item.signal!.phase)).length;
   const emptyReason = picks.length ? null : !snapshots.length

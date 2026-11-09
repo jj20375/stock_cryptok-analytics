@@ -76,6 +76,9 @@ const scannerStrategyDescription = (scanStrategy: ScanStrategy, scanTimeframe: T
   if (scanStrategy === 'big_fish_pro') {
     return `「吃大魚 Pro（15m 勝利方程式＋江恩波動率倍數）」策略（嚴格過濾紅線下 MACD 假金叉，僅掃描長紅洗盤後 Supertrend 首次翻綠或綠線站穩 EMA200 共振，並搭配江恩 1.0595x / 1.08x 波段目標與 1R 自動保本）於 ${scanTimeframe} 週期。`;
   }
+  if (scanStrategy === 'reversal_zone') {
+    return `「多空反轉區間（做多支撐區／做空壓力區）」策略（結合前波箱型高低點假突破收回、布林通道上下軌與 RSI 轉折，直接標出做多支撐區間與做空壓力區間、結構停損與目標價）於 ${scanTimeframe} 週期。`;
+  }
   if (scanStrategy === 'consecutive_volume') {
     return `「連續兩天/期以上爆量策略」（掃描成交量連續放大，代表有大量資金持續關注並建倉的強勢標的）於 ${scanTimeframe} 週期。`;
   }

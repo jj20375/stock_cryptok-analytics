@@ -3,6 +3,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, ArrowLeft, RefreshCw, TrendingUp } from 'lucide-react';
 import { Link, useRouteLoaderData } from 'react-router';
 import { AppLayout } from '../../components/AppLayout';
+import { MacroMarketCompass } from '../home/components/MacroMarketCompass';
+import { ReversalZonePanel } from '../home/components/ReversalZonePanel';
 import { StrategyLayerPanel } from '../home/components/StrategyLayerPanel';
 import { VelaChart } from '../home/components/VelaChart';
 import { useStrategyLayers } from '../home/use-strategy-layers';
@@ -114,6 +116,8 @@ export default function BitgetStockPerpsPage() {
             </div>
           )}
 
+          <MacroMarketCompass market="US" />
+
           <StockPerpHotPicks contracts={contracts} selectedSymbol={symbol} aiEnabled={!!user} onSelect={(nextSymbol, nextTimeframe) => {
             setSymbol(nextSymbol); setTimeframe(nextTimeframe);
             /** 候選點選只定位圖表，不自動開倉；小時線預設顯示支援該週期的兩個共用策略。 */
@@ -136,6 +140,15 @@ export default function BitgetStockPerpsPage() {
               </div>
             ))}
           </section>
+
+          {symbol && chartData.length > 0 && (
+            <ReversalZonePanel
+              symbol={symbol}
+              timeframe={timeframe}
+              data={chartData}
+              alreadyClosed
+            />
+          )}
 
           <StockPerpChartRangePanel timeframe={timeframe} range={chartRanges[timeframe]} visibleData={chartSelection.data}
             totalCount={chartData.length} truncated={chartSelection.truncated} loading={loading || contractsLoading}

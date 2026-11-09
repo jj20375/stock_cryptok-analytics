@@ -6,7 +6,7 @@
 import { useEffect, useState } from 'react';
 import { Clock } from 'lucide-react';
 import { cn } from '../../../utils/cn';
-import type { MacroIndicators, MacroSourceKey } from '../../../services/macroService';
+import type { MacroIndicators, MacroSourceKey, MacroTargetMarket } from '../../../services/macroService';
 
 /** 判讀超過 15 分鐘視為過時並以黃字警示（前端每 5 分鐘自動更新，正常情況不會觸發） */
 const STALE_OUTLOOK_MS = 15 * 60 * 1000;
@@ -15,10 +15,14 @@ const STALE_OUTLOOK_MS = 15 * 60 * 1000;
 const SOURCE_LABELS: { key: MacroSourceKey; label: string }[] = [
   { key: 'nq', label: 'NQ' },
   { key: 'es', label: 'ES' },
+  { key: 'tsm', label: 'TSM' },
+  { key: 'sox', label: '費半' },
   { key: 'usdTwd', label: '台幣' },
   { key: 'dxy', label: 'DXY' },
   { key: 'vix', label: 'VIX' },
   { key: 'us10y', label: '10Y' },
+  { key: 'wti', label: 'WTI' },
+  { key: 'brent', label: '布蘭特' },
 ];
 
 /** 以瀏覽器時區顯示時間；非今天的報價加上日期，一眼看出是前一晚的數據 */
@@ -29,7 +33,7 @@ function formatQuoteTime(ms: number, now: number): string {
   return sameDay ? time : `${date.getMonth() + 1}/${date.getDate()} ${time}`;
 }
 
-export function MacroCompassFreshness({ macro }: { macro: MacroIndicators }) {
+export function MacroCompassFreshness({ macro, market }: { macro: MacroIndicators; market: MacroTargetMarket }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     // 每 30 秒刷新「幾分鐘前」字樣，不重新抓資料
@@ -41,7 +45,9 @@ export function MacroCompassFreshness({ macro }: { macro: MacroIndicators }) {
   const isStale = now - macro.timestamp > STALE_OUTLOOK_MS;
   const quoteTimes = macro.dataStatus?.quoteTimes ?? {};
   const missing = macro.dataStatus?.missing ?? [];
-  const missingLabels = SOURCE_LABELS.filter(({ key }) => missing.includes(key)).map(({ label }) => label);
+  /** 幣圈沒有油價觀點，避免顯示與該市場判讀無關的缺漏警告。 */
+  const sources = SOURCE_LABELS.filter(({ key }) => market !== 'CRYPTO' || (key !== 'wti' && key !== 'brent'));
+  const missingLabels = sources.filter(({ key }) => missing.includes(key)).map(({ label }) => label);
 
   return (
     <div className="mt-2 flex flex-col gap-1 text-[11px] font-mono text-[#E4E3E0]/60">
@@ -53,12 +59,12 @@ export function MacroCompassFreshness({ macro }: { macro: MacroIndicators }) {
         </span>
         <span className="text-[#E4E3E0]/45">
           報價：
-          {SOURCE_LABELS.filter(({ key }) => quoteTimes[key]).map(({ key, label }) => `${label} ${formatQuoteTime(quoteTimes[key]!, now)}`).join(' · ')}
+          {sources.filter(({ key }) => quoteTimes[key]).map(({ key, label }) => `${label} ${formatQuoteTime(quoteTimes[key]!, now)}`).join(' · ')}
         </span>
       </div>
       {missingLabels.length > 0 && (
         <div className="text-amber-300">
-          ⚠️ {missingLabels.join('、')} 報價抓取失敗，相關維度標示「資料暫缺」且未納入評分。
+          ⚠️ {missingLabels.join('、')} 報價抓取失敗，相關判讀可能不完整，詳見各卡片說明。
         </div>
       )}
     </div>

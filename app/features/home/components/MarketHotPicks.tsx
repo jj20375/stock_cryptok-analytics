@@ -34,10 +34,12 @@ const SCAN_STRATEGY_TO_BACKTEST_ID: Record<ScanStrategy, string> = {
   volume_no_break: 'volume_no_breakout_fade',
   daily_volume_spike: 'daily_volume_spike',
   big_fish_pro: 'big_fish_pro',
+  reversal_zone: 'extreme_reversal',
 };
 
 const scanStrategyLabel = (strategy: ScanStrategy) => {
   if (strategy === 'big_fish_pro') return '吃大魚 Pro · 勝利方程式';
+  if (strategy === 'reversal_zone') return '多空反轉區間 · 做多／做空';
   if (strategy === 'consecutive_volume') return '量能連續兩期放大';
   if (strategy === 'volume_no_break') return '量增但未突破前高';
   if (strategy === 'daily_volume_spike') return '日線量增 2 倍';
@@ -110,7 +112,7 @@ export function MarketHotPicks({
             <span className="text-[10px] uppercase tracking-widest text-[#E4E3E0] opacity-50 font-bold font-mono">
               選擇量化分析策略 (Strategy Mechanism)
             </span>
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2">
               <button
                 type="button"
                 onClick={() => onScanStrategyChange('trend')}
@@ -146,6 +148,25 @@ export function MarketHotPicks({
                 </div>
                 <div className="text-[9px] opacity-50 mt-1 leading-normal">
                   過濾紅線假金叉，鎖定洗盤翻綠或綠線站穩 EMA200＋江恩目標。
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => onScanStrategyChange('reversal_zone')}
+                className={cn(
+                  "text-left p-2.5 rounded-sm border text-[11px] transition-all relative active:scale-[0.98]",
+                  scanStrategy === 'reversal_zone'
+                    ? "bg-emerald-500/10 border-emerald-500/50 text-emerald-400 font-bold"
+                    : "bg-black/40 border-white/5 text-[#E4E3E0]/70 hover:border-white/10"
+                )}
+              >
+                <div className="font-bold flex items-center gap-1">
+                  <Activity size={12} className={cn(scanStrategy === 'reversal_zone' ? "text-emerald-400" : "text-[#E4E3E0]/40")} />
+                  多空反轉區間 · 做多／做空
+                </div>
+                <div className="text-[9px] opacity-50 mt-1 leading-normal">
+                  抓前高假突破做空區、前低破底翻做多區，附停損與目標價。
                 </div>
               </button>
 

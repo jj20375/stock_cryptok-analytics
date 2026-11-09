@@ -23,6 +23,7 @@ const RADAR_LINKS: Record<DashboardMarket, { to: string; label: string }> = {
 };
 
 type VerifiedFilter = 'all' | 'verified';
+type DirectionFilter = 'all' | 'LONG' | 'SHORT';
 type ChartTarget = Pick<DashboardPick, 'stockSnapshot' | 'cryptoSnapshot'>;
 
 export function MarketPanel({ market, active }: { market: DashboardMarket; active: boolean }) {
@@ -31,6 +32,8 @@ export function MarketPanel({ market, active }: { market: DashboardMarket; activ
   const [chartPick, setChartPick] = useState<ChartTarget | null>(null);
   /** 只看已驗證：隱藏「未經回測驗證」的訊號；切換面板時保留選擇。 */
   const [verifiedFilter, setVerifiedFilter] = useState<VerifiedFilter>('all');
+  /** 多空方向篩選：支援全部多空、只看做多 (LONG)、只看做空反轉 (SHORT) */
+  const [directionFilter, setDirectionFilter] = useState<DirectionFilter>('all');
   /** 相對時間用的時鐘；每 30 秒更新，不觸發資料請求。 */
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -40,8 +43,15 @@ export function MarketPanel({ market, active }: { market: DashboardMarket; activ
     return () => clearInterval(timer);
   }, [active]);
 
-  const picks = (panel?.picks ?? []).filter(pick => verifiedFilter === 'all' || pick.validation.status !== 'UNVERIFIED');
-  const unverifiedCount = (panel?.picks ?? []).filter(pick => pick.validation.status === 'UNVERIFIED').length;
+  const allPicks = panel?.picks ?? [];
+  const longCount = allPicks.filter(p => (p.direction ?? 'LONG') === 'LONG').length;
+  const shortCount = allPicks.filter(p => p.direction === 'SHORT').length;
+  const picks = allPicks.filter(pick => {
+    if (verifiedFilter === 'verified' && pick.validation.status === 'UNVERIFIED') return false;
+    if (directionFilter !== 'all' && (pick.direction ?? 'LONG') !== directionFilter) return false;
+    return true;
+  });
+  const unverifiedCount = allPicks.filter(pick => pick.validation.status === 'UNVERIFIED').length;
   const radarLink = RADAR_LINKS[market];
 
   return <section aria-label={`${MARKET_LABELS[market]}面板`} className="space-y-4">
@@ -51,16 +61,47 @@ export function MarketPanel({ market, active }: { market: DashboardMarket; activ
     <div className="space-y-3 rounded-xl border border-black/15 bg-white/50 p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-lg font-bold">目前值得關注的{MARKET_LABELS[market]}</h2>
+          <h2 className="text-lg font-bold">目前值得關注的{MARKET_LABELS[market]}（含多空反轉區間）</h2>
           <p className="text-xs opacity-65">
-            {panel ? `本輪完成分析 ${panel.scannedCount} 檔，列出 ${panel.picks.length} 檔候選（其中 ${unverifiedCount} 檔未經回測驗證）` : '讀取中…'}
-            ・<Link to={radarLink.to} className="underline">查看{radarLink.label}全部結果 →</Link></p>
+            {panel ? `本輪完成分析 ${panel.scannedCount} 檔，列出 ${panel.picks.length} 檔候選（做多 ${longCount} 檔／做空反轉 ${shortCount} 檔，其中 ${unverifiedCount} 檔未經回測驗證）` : '讀取中…'}
+            ・<Link to={radarLink.to} className="underline">查看{radarLink.label}全部結果 →</Link>
+            {market === 'US' && (
+              <>
+                ・<Link to="/bitget-stock-perps" className="underline font-semibold">Bitget 美股合約多空反轉作戰室 →</Link>
+              </>
+            )}
+          </p>
         </div>
-        <div className="flex gap-2 text-xs" role="group" aria-label="驗證篩選">
-          {([['all', '全部候選'], ['verified', '只看已驗證']] as const).map(([value, label]) =>
-            <button key={value} type="button" aria-pressed={verifiedFilter === value} onClick={() => setVerifiedFilter(value)}
-              className={`rounded-full border px-3 py-1.5 ${verifiedFilter === value ? 'border-emerald-500 bg-emerald-500/15 text-emerald-200' : 'border-black/20 bg-white/60'}`}>
-              {label}</button>)}
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <div className="flex gap-1.5" role="group" aria-label="多空方向篩選">
+            {([
+              ['all', `全部多空 (${allPicks.length})`],
+              ['LONG', `🟢 做多 (${longCount})`],
+              ['SHORT', `🔴 做空反轉 (${shortCount})`],
+            ] as const).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                aria-pressed={directionFilter === value}
+                onClick={() => setDirectionFilter(value)}
+                className={`rounded-full border px-3 py-1.5 ${
+                  directionFilter === value
+                    ? value === 'SHORT'
+                      ? 'border-rose-500 bg-rose-500/15 text-rose-200 font-semibold'
+                      : 'border-emerald-500 bg-emerald-500/15 text-emerald-200 font-semibold'
+                    : 'border-black/20 bg-white/60'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <div className="flex gap-1.5" role="group" aria-label="驗證篩選">
+            {([['all', '全部候選'], ['verified', '只看已驗證']] as const).map(([value, label]) =>
+              <button key={value} type="button" aria-pressed={verifiedFilter === value} onClick={() => setVerifiedFilter(value)}
+                className={`rounded-full border px-3 py-1.5 ${verifiedFilter === value ? 'border-emerald-500 bg-emerald-500/15 text-emerald-200' : 'border-black/20 bg-white/60'}`}>
+                {label}</button>)}
+          </div>
         </div>
       </div>
       <Disclaimer />

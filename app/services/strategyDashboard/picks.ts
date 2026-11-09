@@ -25,8 +25,10 @@ export function buildLevels(price: number, invalidation: number,
   if (!(price > 0) || !Number.isFinite(invalidation) || !(invalidation > 0) || invalidation >= price) return null;
   const support = supports.find(item => item.value != null && Number.isFinite(item.value) &&
     item.value > invalidation && item.value < price);
+  const riskDist = price - invalidation;
   return { entryLow: support?.value ?? price, entryHigh: price, stopLoss: invalidation,
-    riskPct: (price - invalidation) / price * 100, entryBasis: support?.basis ?? '收盤參考價' };
+    riskPct: riskDist / price * 100, entryBasis: support?.basis ?? '收盤參考價',
+    targetPrice: price + riskDist * 2 };
 }
 
 export interface PickContext {
@@ -53,7 +55,7 @@ export function stockSnapshotToPick(snapshot: UsStockSnapshot, context: PickCont
   const validation = resolveValidation(context.market, backtest, track);
   const breakoutType = signal.phase === 'BREAKOUT' || signal.phase === 'RETEST';
   const pick: DashboardPick = {
-    market: context.market, symbol: snapshot.symbol, name: snapshot.name, price: signal.price,
+    market: context.market, symbol: snapshot.symbol, name: snapshot.name, direction: 'LONG', price: signal.price,
     changePct: signal.changeDay, changeLabel: '當日', strategies: stockStrategies(signal), score: signal.score,
     reasons: signal.reasons, risks: signal.risks,
     levels: buildLevels(signal.price, signal.invalidation, [
@@ -84,7 +86,7 @@ export function cryptoSnapshotToPick(snapshot: RadarSnapshot, context: PickConte
   const validation = resolveValidation(context.market, backtest, track);
   const pick: DashboardPick = {
     market: context.market, symbol: snapshot.symbol, name: snapshot.symbol.replace(/USDT$/, '') + ' / USDT',
-    price: signal.price, changePct: signal.change24h, changeLabel: '24 小時', strategies: cryptoStrategies(signal),
+    direction: 'LONG', price: signal.price, changePct: signal.change24h, changeLabel: '24 小時', strategies: cryptoStrategies(signal),
     score: signal.score, reasons: signal.reasons, risks: signal.risks,
     levels: buildLevels(signal.price, signal.invalidation, [{ value: signal.breakout, basis: '15 分突破位' }]),
     signalClosedAt: signal.barTime + QUARTER_MS, signalTimeframe: '15 分量價＋4 小時趨勢',

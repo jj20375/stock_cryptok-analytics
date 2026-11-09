@@ -24,7 +24,7 @@ export function StockPerpHotPicks({ contracts, selectedSymbol, aiEnabled, onSele
       <div className="grid gap-4 rounded border border-slate-700 bg-slate-900/80 p-4 lg:grid-cols-3">
         <div className="lg:col-span-2">
           <p className="mb-2 text-xs font-bold text-slate-400">選擇量化分析策略</p>
-          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
             {STOCK_PERP_SCAN_STRATEGIES.map(strategy => (
               <button key={strategy.id} type="button" disabled={scanner.busy} aria-pressed={scanner.strategy === strategy.id}
                 onClick={() => scanner.setStrategy(strategy.id)} className={cn('rounded border p-3 text-left disabled:opacity-50',

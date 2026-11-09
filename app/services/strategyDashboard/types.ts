@@ -48,14 +48,18 @@ export interface PickLevels {
   stopLoss: number;
   /** 收盤參考價到停損的距離（百分比，正值）。 */
   riskPct: number;
-  /** 進場下緣採用的依據說明，例如「突破位」「4 小時 EMA20」。 */
+  /** 進場下緣（或做空壓力上緣）採用的依據說明，例如「突破位」「4 小時 EMA20」「前高反轉壓力帶」。 */
   entryBasis: string;
+  /** 波段／反轉目標參考價（選填：均值回歸中軌或 2R 目標價） */
+  targetPrice?: number;
 }
 
 export interface DashboardPick {
   market: DashboardMarket;
   symbol: string;
   name: string;
+  /** 交易方向：LONG 為做多（順勢突破／回踩／支撐反轉做多），SHORT 為做空（前高假突破／壓力帶受阻做空）。預設為 LONG。 */
+  direction?: 'LONG' | 'SHORT';
   /** 最近一根已收盤 K 線的收盤價，不是即時成交價。 */
   price: number;
   /** 漲跌幅百分比；changeLabel 說明比較區間（台美股為當日、虛擬幣為 24 小時）。 */

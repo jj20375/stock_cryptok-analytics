@@ -110,7 +110,17 @@ export function LeftSidebar({
                 <Zap className="w-3 h-3 text-indigo-600" /> AI 智能推薦 (TOP 10)
               </span>
               <span className="opacity-50 font-mono text-[8px]">
-                {scanStrategy === 'consecutive_volume' ? '連續爆量' : scanStrategy === 'volume_no_break' ? '爆量未過高' : scanStrategy === 'daily_volume_spike' ? '日線量增2倍' : '趨勢追蹤'} ({scanStrategy === 'daily_volume_spike' ? '1d' : scanTimeframe})
+                {scanStrategy === 'consecutive_volume'
+                  ? '連續爆量'
+                  : scanStrategy === 'volume_no_break'
+                  ? '爆量未過高'
+                  : scanStrategy === 'daily_volume_spike'
+                  ? '日線量增2倍'
+                  : scanStrategy === 'big_fish_pro'
+                  ? '吃大魚Pro'
+                  : scanStrategy === 'reversal_zone'
+                  ? '多空反轉區'
+                  : '趨勢追蹤'} ({scanStrategy === 'daily_volume_spike' ? '1d' : scanTimeframe})
               </span>
             </p>
             <div className="space-y-2 max-h-[400px] overflow-y-auto pr-1 custom-scrollbar">

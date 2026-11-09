@@ -49,6 +49,7 @@ export const evaluateDailyVolumeSpike = async (
 };
 
 import { IndicatorCache } from '../../services/strategy/indicatorCache';
+import { analyzeReversalZone } from '../../services/strategy/reversalZone';
 import bigFishPro, { evaluateBigFishProAt } from '../../services/strategy/strategies/bigFishPro';
 import type { Candle } from '../../services/strategy/types';
 
@@ -58,6 +59,51 @@ export interface BigFishProScanResult {
   reason: string;
   trend: 'up' | 'down';
 }
+
+/**
+ * 【詳細繁體中文註解】：首頁「多空反轉區間（做多支撐區／做空壓力區）」掃描器
+ * - 排除最後一根未收盤 K 線，防止盤中插針產生假反轉訊號。
+ * - 鎖定觸發 `LONG_CONFIRMED`（破底翻／布林下軌止跌）、`SHORT_CONFIRMED`（假突破／布林上軌受阻）
+ *   以及剛進入反轉區的 `APPROACHING_LONG` / `APPROACHING_SHORT` 標的，並直接回傳進場區間、停損與目標價。
+ */
+export const evaluateReversalZoneScan = async (
+  symbol: string,
+  interval: string = '4h'
+): Promise<BigFishProScanResult> => {
+  try {
+    const { data } = await fetchStockData(symbol, 120, interval);
+    if (data.length < 35) {
+      return { isTriggered: false, score: 0, reason: '歷史 K 線不足 35 根已收盤資料', trend: 'down' };
+    }
+    const closed: Candle[] = data.slice(0, -1).map((d) => ({
+      openTime: d.timestamp,
+      open: d.open,
+      high: d.high,
+      low: d.low,
+      close: d.close,
+      volume: d.volume,
+    }));
+    const rev = analyzeReversalZone(closed);
+    if (!rev || rev.signalState === 'MID_RANGE') {
+      return {
+        isTriggered: false,
+        score: 0,
+        reason: rev?.reason ?? '目前位於區間中段，尚未進入多空反轉區',
+        trend: 'down',
+      };
+    }
+    const isLong =
+      rev.signalState === 'LONG_CONFIRMED' || rev.signalState === 'APPROACHING_LONG';
+    return {
+      isTriggered: true,
+      score: rev.score,
+      reason: `${rev.badge}｜${rev.reason}`,
+      trend: isLong ? 'up' : 'down',
+    };
+  } catch {
+    return { isTriggered: false, score: 0, reason: '反轉區間掃描異常', trend: 'down' };
+  }
+};
 
 /**
  * 【詳細繁體中文註解】：首頁「吃大魚 Pro（15m 勝利方程式＋江恩目標）」掃描器

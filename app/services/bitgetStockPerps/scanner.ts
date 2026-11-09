@@ -1,12 +1,17 @@
 /** @file 股票永續掃描：重用首頁純評分，逐檔讀公開行情，排名與 AI 說明皆無下單副作用。 */
 import { evaluateTrendMomentumData, evaluateConsecutiveVolumeData, evaluateVolumeNoBreakoutData } from '../stockService';
 import { calculateEMA, calculateMA, calculateRSI, calculateMACD, calculateKD } from '../indicators/technical';
+import { analyzeReversalZone } from '../strategy/reversalZone';
+import { IndicatorCache } from '../strategy/indicatorCache';
+import bigFishPro, { evaluateBigFishProAt } from '../strategy/strategies/bigFishPro';
 import { loadStockPerpCandles, loadStockPerpTickers, STOCK_PERP_INTERVALS, type StockPerpContract, type StockPerpTicker } from './market';
 import type { Candle } from '../strategy/types';
 import type { StockDataPoint, Timeframe } from '../../types';
 import type { ScanStrategy } from '../../features/home/types';
 
 export const STOCK_PERP_SCAN_STRATEGIES: { id: ScanStrategy; name: string; description: string }[] = [
+  { id: 'reversal_zone', name: '多空反轉區間 (做多／做空)', description: '結合前高假突破做空、前低破底翻做多與布林上下軌，直接算出多空反轉區間、停損與目標價。' },
+  { id: 'big_fish_pro', name: '吃大魚 Pro · 勝利方程式', description: '過濾紅線假金叉，鎖定洗盤翻綠或綠線站穩 EMA200＋江恩波動率目標。' },
   { id: 'trend', name: '多空趨勢強勢追蹤', description: '共用 MA20、EMA26、RSI、MACD、KD 評分，40 分以上列為觀察。' },
   { id: 'consecutive_volume', name: '量能連續兩期以上放大', description: '連續至少兩根量能大於前 5 根均量的 1.5 倍。' },
   { id: 'volume_no_break', name: '量增但未突破前高', description: '量能大於前 5 根均量 1.5 倍且未過前高，僅作做空觀察。' },
@@ -40,14 +45,40 @@ export function scoreStockPerpCandidate(contract: StockPerpContract, ticker: Sto
   strategy: ScanStrategy, timeframe: Timeframe, now: number): { status: 'match' | 'unmatched' | 'insufficient' | 'stale'; pick?: StockPerpPick } {
   const duration = STOCK_PERP_INTERVALS[timeframe].duration;
   const closed = candles.filter(c => c.openTime + duration <= now);
-  const minimum = strategy === 'trend' ? 60 : strategy === 'consecutive_volume' ? 10 : strategy === 'volume_no_break' ? 6 : 2;
+  const minimum =
+    strategy === 'trend' || strategy === 'big_fish_pro'
+      ? 60
+      : strategy === 'reversal_zone'
+      ? 35
+      : strategy === 'consecutive_volume'
+      ? 10
+      : strategy === 'volume_no_break'
+      ? 6
+      : 2;
   if (closed.length < minimum) return { status: 'insufficient' };
   const latest = closed.at(-1)!, previous = closed.at(-2)!;
   if (now - latest.openTime - duration > duration * 3) return { status: 'stale' };
   if (latest.volume <= 0 || previous.volume <= 0) return { status: 'insufficient' };
   const data = indicatorData(closed);
   let score = 0, reason = '', triggered = false, bias = '方向待確認';
-  if (strategy === 'trend') {
+  if (strategy === 'reversal_zone') {
+    const rev = analyzeReversalZone(closed);
+    if (rev && rev.signalState !== 'MID_RANGE') {
+      triggered = true;
+      score = rev.score;
+      reason = rev.reason;
+      bias = rev.badge;
+    }
+  } else if (strategy === 'big_fish_pro') {
+    const indicators = new IndicatorCache(closed);
+    const sig = evaluateBigFishProAt(closed, closed.length - 1, indicators, bigFishPro.defaultParams);
+    if (sig.triggered) {
+      triggered = true;
+      score = sig.score;
+      reason = sig.reason;
+      bias = '🟢 吃大魚 Pro 做多';
+    }
+  } else if (strategy === 'trend') {
     const result = evaluateTrendMomentumData(data);
     score = result.score; triggered = result.isTriggered; reason = result.reasons.join('；');
     bias = result.trend === 'up' ? '做多觀察' : '趨勢待確認';

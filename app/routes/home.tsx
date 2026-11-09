@@ -16,7 +16,11 @@ import {
 } from '../services/stockService';
 import type { StockDataPoint, Timeframe } from '../types';
 import { buildScannerPrompt, buildStrategyPrompt } from '../features/home/ai-prompts';
-import { evaluateBigFishProScan, evaluateDailyVolumeSpike } from '../features/home/scanner-strategies';
+import {
+  evaluateBigFishProScan,
+  evaluateDailyVolumeSpike,
+  evaluateReversalZoneScan,
+} from '../features/home/scanner-strategies';
 import { HomeHeader } from '../features/home/components/HomeHeader';
 import { LeftSidebar } from '../features/home/components/LeftSidebar';
 import { MacroMarketCompass } from '../features/home/components/MacroMarketCompass';
@@ -345,6 +349,17 @@ export default function App() {
           }
         } else if (scanStrategy === 'big_fish_pro') {
           const res = await evaluateBigFishProScan(stock.symbol, scanTimeframe);
+          if (res.isTriggered) {
+            results.push({
+              symbol: stock.symbol,
+              name: stock.name,
+              score: res.score,
+              reason: res.reason,
+              trend: res.trend,
+            });
+          }
+        } else if (scanStrategy === 'reversal_zone') {
+          const res = await evaluateReversalZoneScan(stock.symbol, scanTimeframe);
           if (res.isTriggered) {
             results.push({
               symbol: stock.symbol,
