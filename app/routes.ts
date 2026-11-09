@@ -42,6 +42,8 @@ export default [
   route("tw-stock-radar", "routes/tw-stock-radar.tsx"),
   route("tw-daytrade", "routes/tw-daytrade.tsx"),
   route("tradingview-signals", "routes/tradingview-signals.tsx"),
+  route("metaphysics", "routes/metaphysics.tsx"),
+  route("api/metaphysics", "routes/api.metaphysics.ts"),
   route("login", "routes/login.tsx"),
   route("register", "routes/register.tsx"),
   route("portfolio", "routes/portfolio.tsx"),
