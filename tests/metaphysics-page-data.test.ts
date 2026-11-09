@@ -35,5 +35,7 @@ test('市場解說資料：最多 6 條觸發規則，模板含方向分數與�
   const [today] = buildMarketDays('TW', '2026-11-09');
   const { facts, fallback } = marketFacts('台股', today);
   assert.ok(facts.length <= 9);
-  assert.match(fallback, /方向分數 9、變盤強度 1/);
+  assert.match(fallback, /方向分數 9（中性）、變盤強度 1/);
+  // |分數| < 30 時頁面標「中性」，送給 AI 的資料也必須明說中性，否則 AI 會把正值寫成偏多（2026-11-09 實測發生）。
+  assert.ok(facts.some((f) => f.includes('方向分數：9（中性')));
 });

@@ -5,6 +5,7 @@
  */
 import type { BaziProfile } from './baziProfile';
 import type { DailyLuck, PillarLuck } from './baziLuck';
+import { DIRECTION_CALL_THRESHOLD } from './hitRate';
 import type { ZiweiDayResult } from './types';
 
 export interface NarrativeFacts { facts: string[]; fallback: string }
@@ -12,11 +13,24 @@ export interface NarrativeFacts { facts: string[]; fallback: string }
 /** 觸發規則最多列出幾條：太多會稀釋 AI 解說重點，也讓模板文字過長。 */
 const MAX_TRIGGERS = 6;
 
+/**
+ * 方向分數的文字標籤，與頁面日曆、命中率統計共用同一門檻（|分數| ≥ 30 才算表態）。
+ * 必須明確寫給 AI：只寫「正值偏多」時，AI 會把 +9 這種中性分數解說成偏多，與頁面標示矛盾。
+ */
+function directionLabel(score: number): '偏多' | '偏空' | '中性' {
+  if (score >= DIRECTION_CALL_THRESHOLD) return '偏多';
+  if (score <= -DIRECTION_CALL_THRESHOLD) return '偏空';
+  return '中性';
+}
+
 export function marketFacts(label: string, result: ZiweiDayResult): NarrativeFacts {
   const triggers = result.triggers.slice(0, MAX_TRIGGERS);
+  const direction = directionLabel(result.directionScore);
   return {
-    facts: [`市場：${label}`, `方向分數：${result.directionScore}（-100～+100，正值偏多）`, `變盤強度：${result.turningStrength}（0–3）`, ...triggers],
-    fallback: `${label}今日方向分數 ${result.directionScore}、變盤強度 ${result.turningStrength}。主要訊號：${triggers.slice(0, 3).join('；') || '無明顯四化衝擊'}。`,
+    facts: [`市場：${label}`,
+      `方向分數：${result.directionScore}（${direction}；範圍 -100～+100，絕對值 ≥ ${DIRECTION_CALL_THRESHOLD} 才算偏多或偏空）`,
+      `變盤強度：${result.turningStrength}（0–3）`, ...triggers],
+    fallback: `${label}今日方向分數 ${result.directionScore}（${direction}）、變盤強度 ${result.turningStrength}。主要訊號：${triggers.slice(0, 3).join('；') || '無明顯四化衝擊'}。`,
   };
 }
 
