@@ -32,6 +32,8 @@ POTENTIAL_RADAR_ENABLED = "false"
 BINANCE_PERP_RADAR_ENABLED = "false"
 # 美股只在收盤附近檢查；同時涵蓋紐約夏令與冬令時間。
 US_STOCK_RADAR_ENABLED = "true"
+# 美股現貨 rToken 獨立行情與訊號通知，每五分鐘掛於既有 Trigger；不允許任何下單。
+STOCK_TOKEN_RADAR_ENABLED = "true"
 # 台股只在台北 13:08／13:23／13:38／13:53 檢查。
 TW_STOCK_RADAR_ENABLED = "true"
 # 機密變數已移至 .dev.vars，正式上線請透過 wrangler secret put 設定

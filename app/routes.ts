@@ -39,6 +39,7 @@ export default [
   route("meme-desk", "routes/meme-desk.tsx"),
   route("api/meme-desk", "routes/api.meme-desk.ts"),
   route("us-stock-radar", "routes/us-stock-radar.tsx"),
+  route("stock-token-radar", "routes/stock-token-radar.tsx"),
   route("tw-stock-radar", "routes/tw-stock-radar.tsx"),
   route("tw-daytrade", "routes/tw-daytrade.tsx"),
   route("tradingview-signals", "routes/tradingview-signals.tsx"),

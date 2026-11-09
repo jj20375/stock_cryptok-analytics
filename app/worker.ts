@@ -15,6 +15,7 @@ import { syncRegisteredLedgers } from "./services/bitgetLedger/sync.server";
 import { runFuturesAutomation } from "./services/cryptoFutures/automation.server";
 import { runTwPreopenMacroSnapshot } from "./services/macro/snapshotStore.server";
 import { runScheduledMemeDeskRoutine } from "./services/memeDesk/deskRunner";
+import { runStockTokenRadar } from "./services/stockTokenRadar/runner.server";
 
 import { SCHEDULES, isTwPreopenSnapshotTime, isUsDailyReportTime } from "./services/scheduledJobs";
 
@@ -53,6 +54,8 @@ export default {
                     ctx.waitUntil(runScheduledMemeDeskRoutine(env, scheduledAt).catch(() => console.warn('[Meme Desk] 排程巡檢未完成')));
                 }
                 if (scheduledMinute % 5 !== 0) break;
+                // 美股現貨代幣使用獨立開關，只讀行情／寫快照／發 Slack；不啟用一般幣掃描或自動新倉。
+                ctx.waitUntil(runStockTokenRadar(env).catch(() => console.warn('[Stock Token Radar] 本輪未完成，請確認0030 migration與Bitget連線')));
                 /** 原生停損之外的備援與成交對帳維持五分鐘，不因關閉自動新倉而停用。 */
                 ctx.waitUntil((async () => {
                     // 先檢查持倉保護，歷史分頁同步不能延遲既有停損；兩者失敗各自保留重試。

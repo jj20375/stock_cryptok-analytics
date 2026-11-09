@@ -87,6 +87,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
           <Link to="/us-stock-radar" className={navLinkClass('/us-stock-radar')} title="美股潛力雷達" aria-label="美股潛力雷達">
             <TrendingUp size={20} />
           </Link>
+          <Link to="/stock-token-radar" className={navLinkClass('/stock-token-radar')} title="Bitget 美股代幣進場雷達" aria-label="Bitget 美股代幣進場雷達"><Crosshair size={20} /></Link>
           <Link to="/tw-stock-radar" className={navLinkClass('/tw-stock-radar')} title="台股潛力雷達" aria-label="台股潛力雷達">
             <Radar size={20} />
           </Link>
@@ -155,6 +156,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
         <Link to="/us-stock-radar" className={navLinkClass('/us-stock-radar')} title="美股潛力雷達" aria-label="美股潛力雷達">
           <TrendingUp size={20} />
         </Link>
+        <Link to="/stock-token-radar" className={navLinkClass('/stock-token-radar')} title="Bitget 美股代幣進場雷達" aria-label="Bitget 美股代幣進場雷達"><Crosshair size={20} /></Link>
         <Link to="/tw-stock-radar" className={navLinkClass('/tw-stock-radar')} title="台股潛力雷達" aria-label="台股潛力雷達">
           <Radar size={20} />
         </Link>
