@@ -20,6 +20,7 @@ import { evaluateBigFishProScan, evaluateDailyVolumeSpike } from '../features/ho
 import { HomeHeader } from '../features/home/components/HomeHeader';
 import { LeftSidebar } from '../features/home/components/LeftSidebar';
 import { MacroMarketCompass } from '../features/home/components/MacroMarketCompass';
+import { MetaphysicsMiniCard } from '../features/home/components/MetaphysicsMiniCard';
 import { MainChartPanel } from '../features/home/components/MainChartPanel';
 import { MarketHotPicks } from '../features/home/components/MarketHotPicks';
 import { StockBriefPanel } from '../features/home/components/StockBriefPanel';
@@ -540,6 +541,7 @@ export default function App() {
 
         <div className="lg:col-span-3 flex flex-col gap-4">
           <MacroMarketCompass market={market} />
+          <MetaphysicsMiniCard />
           <MarketHotPicks
             hotPicksRef={hotPicksRef}
             market={market}

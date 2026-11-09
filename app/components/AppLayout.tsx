@@ -15,7 +15,8 @@ import {
   Satellite,
   Newspaper,
   Crosshair,
-  ShieldAlert
+  ShieldAlert,
+  MoonStar
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -93,6 +94,9 @@ export function AppLayout({ children }: { children: ReactNode }) {
           <Link to="/tradingview-signals" className={navLinkClass('/tradingview-signals')} title="TradingView 訊號績效" aria-label="TradingView 訊號績效">
             <Satellite size={20} />
           </Link>
+          <Link to="/metaphysics" className={navLinkClass('/metaphysics')} title="玄學羅盤（紫微變盤＋八字運勢）" aria-label="玄學羅盤">
+            <MoonStar size={20} />
+          </Link>
         </nav>
         <div className="mt-auto flex flex-col gap-6 pb-4 w-full px-2 items-center">
           {user ? (
@@ -157,6 +161,9 @@ export function AppLayout({ children }: { children: ReactNode }) {
         <Link to="/tw-daytrade" className={navLinkClass('/tw-daytrade')} title="台股當沖 Top 10" aria-label="台股當沖 Top 10"><Activity size={20} /></Link>
         <Link to="/tradingview-signals" className={navLinkClass('/tradingview-signals')} title="TradingView 訊號績效" aria-label="TradingView 訊號績效">
           <Satellite size={20} />
+        </Link>
+        <Link to="/metaphysics" className={navLinkClass('/metaphysics')} title="玄學羅盤（紫微變盤＋八字運勢）" aria-label="玄學羅盤">
+          <MoonStar size={20} />
         </Link>
         <Link to="/settings" className={navLinkClass("/settings")}>
           <Settings size={20} />

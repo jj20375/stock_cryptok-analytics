@@ -318,6 +318,10 @@ export default function SettingsRoute() {
             </div>
           )}
 
+          <div className="p-4 rounded-sm border border-[#E4E3E0] bg-white text-sm text-[#141414]">
+            生辰資料改在 <Link to="/metaphysics" className="underline">玄學羅盤</Link> 的「我的八字」分頁填寫，資料加密保存。
+          </div>
+
           <Form method="post" className="space-y-8">
             {/* 交易模式設定 */}
             <div className="bg-white p-6 rounded-xl shadow-sm border border-[#E4E3E0] transition-shadow hover:shadow-md">
